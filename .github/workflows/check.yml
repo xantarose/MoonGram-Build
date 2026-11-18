@@ -1,0 +1,44 @@
+name: MoonGram checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: xcode-27
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Package source history for the local checkout
+        if: github.event_name != 'pull_request'
+        run: git bundle create "$RUNNER_TEMP/MoonGram-source-history.bundle" HEAD
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: github.event_name != 'pull_request'
+        with:
+          name: MoonGram-source-history
+          path: ${{ runner.temp }}/MoonGram-source-history.bundle
+          retention-days: 3
+      - name: Core tests
+        run: swift test
+      - name: Profile service tests
+        run: node --test service/test/server.test.mjs
+      - name: Apply the pinned integration
+        run: python3 tools/prepare.py
+      - name: Build configuration and artifact regression tests
+        run: python3 -m unittest discover -s tools/tests
+      - name: Swift syntax and patch whitespace
+        run: python3 tools/check.py
+      - name: Native UI compile and simulator screenshots
+        run: python3 tools/ios_qa.py
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: MoonGram-iOS-QA
+          path: dist/ios-qa/
+          if-no-files-found: ignore
+          retention-days: 3

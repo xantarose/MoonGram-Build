@@ -1,0 +1,1117 @@
+diff --git a/Telegram/BUILD b/Telegram/BUILD
+index 1ac8279b..79635d59 100644
+--- a/Telegram/BUILD
++++ b/Telegram/BUILD
+@@ -71,6 +71,30 @@ config_setting(
+     },
+ )
+ 
++bool_flag(
++    name = "moongramRuntimeAPI",
++    build_setting_default = False,
++    visibility = ["//visibility:public"],
++)
++
++config_setting(
++    name = "moongramRuntimeAPISetting",
++    flag_values = {":moongramRuntimeAPI": "True"},
++    visibility = ["//visibility:public"],
++)
++
++bool_flag(
++    name = "moongramStandalone",
++    build_setting_default = False,
++    visibility = ["//visibility:public"],
++)
++
++config_setting(
++    name = "moongramStandaloneSetting",
++    flag_values = {":moongramStandalone": "True"},
++    visibility = ["//visibility:public"],
++)
++
+ bool_flag(
+     name = "disableExtensions",
+     build_setting_default = False,
+@@ -341,7 +365,7 @@ alternate_icon_folders = [
+     "PremiumTurbo",
+ ]
+ 
+-composer_icon_folders = ["Telegram"]
++composer_icon_folders = ["MoonGram"]
+ 
+ [
+     filegroup(
+@@ -585,12 +609,30 @@ official_background_gpu_fragment = """
+ """
+ background_gpu_fragment = official_background_gpu_fragment if telegram_bundle_id == "ph.telegra.Telegraph" else ""
+ 
++private_app_identifier_fragment = """
++    <key>application-identifier</key>
++    <string>{telegram_team_id}.{telegram_bundle_id}</string>
++""".format(telegram_team_id=telegram_team_id, telegram_bundle_id=telegram_bundle_id)
++
++plist_fragment(
++    name = "MoonGramStorageInfoPlist",
++    extension = "plist",
++    template = select({
++        ":moongramStandaloneSetting": "<key>MoonGramStorageMode</key><string>standalone</string>",
++        "//conditions:default": "<key>MoonGramStorageMode</key><string>app-group</string>",
++    }) + select({
++        ":moongramRuntimeAPISetting": "<key>MoonGramRuntimeAPIRequired</key><true/>",
++        "//conditions:default": "",
++    }),
++)
++
+ plist_fragment(
+     name = "TelegramEntitlements",
+     extension = "entitlements",
+-    template = "".join([
+-        aps_fragment,
+-        app_groups_fragment,
++    template = aps_fragment + select({
++        ":moongramStandaloneSetting": private_app_identifier_fragment,
++        "//conditions:default": app_groups_fragment,
++    }) + "".join([
+         siri_fragment,
+         associated_domains_fragment,
+         icloud_fragment,
+@@ -641,7 +683,7 @@ plist_fragment(
+     template =
+     """
+     <key>CFBundleDisplayName</key>
+-    <string>Telegram</string>
++    <string>MoonGram</string>
+     """
+ )
+ 
+@@ -1696,7 +1738,7 @@ plist_fragment(
+     <key>CFBundleDevelopmentRegion</key>
+     <string>en</string>
+     <key>CFBundleDisplayName</key>
+-    <string>Telegram</string>
++    <string>MoonGram</string>
+     <key>CFBundleIdentifier</key>
+     <string>{telegram_bundle_id}</string>
+     <key>CFBundleName</key>
+@@ -1917,6 +1959,7 @@ ios_application(
+     entitlements = ":TelegramEntitlements.entitlements",
+     infoplists = [
+         ":TelegramInfoPlist",
++        ":MoonGramStorageInfoPlist",
+         ":BuildNumberInfoPlist",
+         ":VersionInfoPlist",
+         ":RequiredDeviceCapabilitiesPlist",
+@@ -1941,6 +1984,7 @@ ios_application(
+         ":AppStringResources",
+     ],
+     extensions = select({
++        ":moongramStandaloneSetting": [],
+         ":disableExtensionsSetting": [],
+         "//conditions:default": [
+             ":ShareExtension",
+@@ -1955,6 +1999,7 @@ ios_application(
+     # --//Telegram:embedWatchApp is set (Make.py sets it for device configs when
+     # --embedWatchApp is passed). Off by default, so simulator/dev builds are unaffected.
+     watch_application = select({
++        ":moongramStandaloneSetting": None,
+         ":embedWatchAppSetting": ":TelegramWatchApp",
+         "//conditions:default": None,
+     }),
+diff --git a/Telegram/Telegram-iOS/ar.lproj/InfoPlist.strings b/Telegram/Telegram-iOS/ar.lproj/InfoPlist.strings
+index 174276a9..4ec0d718 100644
+--- a/Telegram/Telegram-iOS/ar.lproj/InfoPlist.strings
++++ b/Telegram/Telegram-iOS/ar.lproj/InfoPlist.strings
+@@ -1,5 +1,5 @@
+ /* Localized versions of Info.plist keys */
+-"CFBundleDisplayName" = "تيليجرام";
++"CFBundleDisplayName" = "MoonGram";
+ "NSContactsUsageDescription" = "سيقوم تيليجرام برفع جهات الاتصال الخاصة بك باستمرار إلى خوادم التخزين السحابية ذات التشفير العالي لتتمكن من التواصل مع أصدقائك من خلال جميع أجهزتك.";
+ "NSLocationWhenInUseUsageDescription" = "عندما ترغب في مشاركة مكانك مع أصدقائك، تيليجرام يحتاج لصلاحيات لعرض الخريطة لهم.";
+ "NSLocationAlwaysAndWhenInUseUsageDescription" = "عندما تختار أن تشارك مكانك بشكل حي مع أصدقائك في المحادثة، يحتاج تيليجرام إلى الوصول لموقعك في الخلفية حتى بعد إغلاق تيليجرام خلال فترة المشاركة.";
+diff --git a/Telegram/Telegram-iOS/ko.lproj/InfoPlist.strings b/Telegram/Telegram-iOS/ko.lproj/InfoPlist.strings
+index b692e0af..19f37905 100644
+--- a/Telegram/Telegram-iOS/ko.lproj/InfoPlist.strings
++++ b/Telegram/Telegram-iOS/ko.lproj/InfoPlist.strings
+@@ -1,5 +1,5 @@
+ /* Localized versions of Info.plist keys */
+-"CFBundleDisplayName" = "텔레그램";
++"CFBundleDisplayName" = "MoonGram";
+ "NSContactsUsageDescription" = "Telegram will continuously upload your contacts to its heavily encrypted cloud servers to let you connect with your friends across all your devices.";
+ "NSLocationWhenInUseUsageDescription" = "친구에게 회원님의 위치를 전송할 경우 위치를 지도에 표시하기 위해 텔레그램이 위치 정보에 접근할 수 있어야 합니다.";
+ "NSLocationAlwaysUsageDescription" = "친구에게 회원님의 위치를 전송할 경우 위치를 지도에 표시하기 위해 텔레그램이 위치 정보에 접근할 수 있어야 합니다. 애플워치에 위치 전송을 위해서도 필요합니다.";
+diff --git a/build-system/Make/Make.py b/build-system/Make/Make.py
+index 08b05aef..53245218 100644
+--- a/build-system/Make/Make.py
++++ b/build-system/Make/Make.py
+@@ -320,6 +320,8 @@ class BazelCommandLine:
+             ]
+ 
+         combined_arguments += self.configuration_args
++        if self.additional_args:
++            combined_arguments += self.additional_args
+         if self.profile_swift:
+             combined_arguments += ['--config=swift_profile']
+ 
+@@ -617,6 +619,8 @@ def build(bazel, arguments):
+         override_xcode_version=arguments.overrideXcodeVersion,
+         bazel_user_root=arguments.bazelUserRoot
+     )
++    if arguments.bazelArguments:
++        bazel_command_line.add_additional_args(shlex.split(arguments.bazelArguments))
+ 
+     if arguments.lock:
+         bazel_command_line.set_lock(True)
+diff --git a/docs/state-sync.md b/docs/state-sync.md
+index 40fcdcd4..51037584 100644
+--- a/docs/state-sync.md
++++ b/docs/state-sync.md
+@@ -1112,3 +1112,12 @@ gets a shrunk test before its fix. The comparison with master, and every model r
+   `docs/superpowers/specs/2026-10-15-difference-too-long-design.md` (the differenceTooLong rules).
+ - `docs/superpowers/plans/`: the stage plans, kept as history.
+ - `docs/superpowers/plans/2026-10-14-state-sync-foundation/followups.md`: what each stage parked.
++
++
++## MoonGram: explicit outgoing read suppression
++
++MoonGram adds opt-in per-account device-local settings in MoonGramCore. This is a deliberate exception for outgoing cloud read receipts only, not an exception to history/update/difference retry rules. `synchronizePeerReadState` confirms both pending Push and Validate operations using the existing `confirmSynchronized` helper when suppression is enabled, leaving local read markers/counts intact. Secret-chat read synchronization is unchanged. Thread reads and local mention/reaction/content cleanup are retained while their selected outgoing RPCs are omitted. Operation-log workers still remove completed entries. No fake pts/affected-message result is injected.
++
++The portable regression probe compiles the actual privacy helper and top-level read gate against Telegram's real Signal/Subscriber/Disposable/Atomic/mapping code, with Postbox/store/network stand-ins. It checks live policy updates, account routing, observer disposal, subscription-time decisions and queue confirmation for Push/Validate. This is not an actual Postbox/network integration test or the state-sync truth-server seed suite. Full client and two-account/device verification remain required.
++
++A receipt already sent cannot be recalled; other sessions remain independent. Disabling suppression resumes cumulative read bounds, which can acknowledge older locally-read messages. Privacy settings are separate from cosmetic enable/display mode and are never exported in the shared profile.
+diff --git a/submodules/BuildConfig/BUILD b/submodules/BuildConfig/BUILD
+index 4f8f0aaf..8f1ae025 100644
+--- a/submodules/BuildConfig/BUILD
++++ b/submodules/BuildConfig/BUILD
+@@ -29,7 +29,10 @@ objc_library(
+         "-DAPP_SPECIFIC_URL_SCHEME=\\\"{}\\\"".format(telegram_app_specific_url_scheme),
+         "-DAPP_CONFIG_IS_ICLOUD_ENABLED={}".format("true" if telegram_enable_icloud else "false"),
+         "-DAPP_CONFIG_IS_SIRI_ENABLED={}".format("true" if telegram_enable_siri else "false"),
+-    ],
++    ] + select({
++        "//Telegram:moongramRuntimeAPISetting": ["-DMOONGRAM_RUNTIME_API"],
++        "//conditions:default": [],
++    }),
+     hdrs = glob([
+         "PublicHeaders/**/*.h",
+     ]),
+diff --git a/submodules/BuildConfig/Sources/BuildConfig.m b/submodules/BuildConfig/Sources/BuildConfig.m
+index 0038369a..e61c907f 100644
+--- a/submodules/BuildConfig/Sources/BuildConfig.m
++++ b/submodules/BuildConfig/Sources/BuildConfig.m
+@@ -131,8 +131,33 @@ API_AVAILABLE(ios(10))
+ - (instancetype _Nonnull)initWithBaseAppBundleId:(NSString * _Nonnull)baseAppBundleId {
+     self = [super init];
+     if (self != nil) {
++#if defined(MOONGRAM_RUNTIME_API)
++        // Public CI produces an unconfigured template. The API pair is added to the app
++        // bundle locally before re-signing; no network bootstrap or new login UI is needed.
++        _apiId = 0;
++        _apiHash = @"";
++        NSURL *apiURL = [[NSBundle mainBundle] URLForResource:@"MoonGramAPI" withExtension:@"json"];
++        id resourceSize = nil;
++        if (apiURL != nil && [apiURL getResourceValue:&resourceSize forKey:NSURLFileSizeKey error:NULL]
++            && [resourceSize isKindOfClass:[NSNumber class]] && [resourceSize unsignedLongLongValue] <= 4096) {
++            NSData *data = [NSData dataWithContentsOfURL:apiURL];
++            id value = data.length <= 4096 && data.length > 0 ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
++            if ([value isKindOfClass:[NSDictionary class]] && [(NSDictionary *)value count] == 2) {
++                NSNumber *apiId = [(NSDictionary *)value objectForKey:@"api_id"];
++                NSString *apiHash = [(NSDictionary *)value objectForKey:@"api_hash"];
++                if ([apiId isKindOfClass:[NSNumber class]] && CFGetTypeID((__bridge CFTypeRef)apiId) != CFBooleanGetTypeID()
++                    && [apiId longLongValue] > 0 && [apiId longLongValue] <= INT32_MAX && [apiId doubleValue] == (double)[apiId longLongValue]
++                    && [apiHash isKindOfClass:[NSString class]] && [apiHash length] == 32
++                    && [apiHash rangeOfCharacterFromSet:[[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"] invertedSet]].location == NSNotFound) {
++                    _apiId = [apiId intValue];
++                    _apiHash = [apiHash copy];
++                }
++            }
++        }
++#else
+         _apiId = APP_CONFIG_API_ID;
+         _apiHash = @(APP_CONFIG_API_HASH);
++#endif
+         
+         _dataDict = [[NSMutableDictionary alloc] init];
+         
+diff --git a/submodules/GalleryUI/BUILD b/submodules/GalleryUI/BUILD
+index 0116b061..5508289a 100644
+--- a/submodules/GalleryUI/BUILD
++++ b/submodules/GalleryUI/BUILD
+@@ -10,6 +10,7 @@ swift_library(
+         "-warnings-as-errors",
+     ],
+     deps = [
++        "//submodules/MoonGramBridge",
+         "//submodules/UrlWhitelist",
+         "//submodules/SSignalKit/SwiftSignalKit:SwiftSignalKit",
+         "//submodules/AsyncDisplayKit:AsyncDisplayKit",
+diff --git a/submodules/GalleryUI/Sources/SecretMediaPreviewController.swift b/submodules/GalleryUI/Sources/SecretMediaPreviewController.swift
+index 3596b9d8..3f37712a 100644
+--- a/submodules/GalleryUI/Sources/SecretMediaPreviewController.swift
++++ b/submodules/GalleryUI/Sources/SecretMediaPreviewController.swift
+@@ -1,4 +1,5 @@
+ import Foundation
++import MoonGramBridge
+ import UIKit
+ import AsyncDisplayKit
+ import Display
+@@ -146,6 +147,7 @@ private final class SecretMediaPreviewControllerNode: GalleryControllerNode {
+ }
+ 
+ public final class SecretMediaPreviewController: ViewController {
++    private let moonGramCaptureDisposable = MetaDisposable()
+     private let context: AccountContext
+     private let messageId: MessageId
+     
+@@ -226,6 +228,7 @@ public final class SecretMediaPreviewController: ViewController {
+     }
+     
+     deinit {
++        self.moonGramCaptureDisposable.dispose()
+         self.disposable.dispose()
+         self.markMessageAsConsumedDisposable.dispose()
+         if let hiddenMediaManagerIndex = self.hiddenMediaManagerIndex {
+@@ -549,6 +552,7 @@ public final class SecretMediaPreviewController: ViewController {
+                     self?.didSetReady = true
+                 }
+                 self._ready.set(ready |> map { true })
++                self.moonGramCaptureDisposable.set(MoonVaultBridge.viewOnce(context: self.context, message: message, cachedVideoPath: tempFilePath))
+                 self.markMessageAsConsumedDisposable.set(self.context.engine.messages.markMessageContentAsConsumedInteractively(messageId: message.id).start())
+             } else {
+                 var beginTimeAndTimeout: (Double, Double, Bool)?
+diff --git a/submodules/PasscodeCore/Sources/Passcode.swift b/submodules/PasscodeCore/Sources/Passcode.swift
+index d1ff0f65..93fd26d0 100644
+--- a/submodules/PasscodeCore/Sources/Passcode.swift
++++ b/submodules/PasscodeCore/Sources/Passcode.swift
+@@ -10,12 +10,19 @@ public struct PasscodeConfiguration: Equatable, Sendable {
+         case appExtension
+     }
+ 
++    public enum StorageScope: Equatable, Sendable {
++        case applicationGroup
++        case applicationOnly
++    }
++
++    public let storageScope: StorageScope
+     public let appGroupIdentifier: String
+     public let processRole: ProcessRole
+     public let biometricKeychainService: String?
+     public let keychainScope: String?
+ 
+-    public init(appGroupIdentifier: String, processRole: ProcessRole, biometricKeychainService: String? = nil, keychainScope: String? = nil) {
++    public init(appGroupIdentifier: String, processRole: ProcessRole, biometricKeychainService: String? = nil, keychainScope: String? = nil, storageScope: StorageScope = .applicationGroup) {
++        self.storageScope = storageScope
+         self.appGroupIdentifier = appGroupIdentifier
+         self.processRole = processRole
+         self.biometricKeychainService = biometricKeychainService
+@@ -47,6 +54,9 @@ public final class PasscodeEnvironment: @unchecked Sendable {
+             throw PasscodeError.unavailable
+         }
+         #endif
++        guard configuration.storageScope != .applicationOnly || configuration.processRole == .mainApp else {
++            throw PasscodeError.unavailable
++        }
+         if let current = self.configuration {
+             guard current == configuration else { throw PasscodeError.unavailable }
+             return
+@@ -73,6 +83,9 @@ public final class PasscodeEnvironment: @unchecked Sendable {
+         self.mutex.lock()
+         defer { self.mutex.unlock() }
+         guard let configuration = self.configuration else { throw PasscodeError.unavailable }
++        if configuration.storageScope == .applicationOnly {
++            return try self.privateAccessGroupLocked(configuration)
++        }
+         return configuration.appGroupIdentifier
+     }
+ 
+@@ -89,7 +102,13 @@ public final class PasscodeEnvironment: @unchecked Sendable {
+     public func privateAccessGroup() throws -> String {
+         self.mutex.lock()
+         defer { self.mutex.unlock() }
+-        guard let configuration = self.configuration, configuration.processRole == .mainApp else { throw PasscodeError.unavailable }
++        guard let configuration = self.configuration else { throw PasscodeError.unavailable }
++        return try self.privateAccessGroupLocked(configuration)
++    }
++
++    // Caller holds mutex. Never call the public locking accessor recursively.
++    private func privateAccessGroupLocked(_ configuration: PasscodeConfiguration) throws -> String {
++        guard configuration.processRole == .mainApp else { throw PasscodeError.unavailable }
+         if let group = self.resolvedPrivateAccessGroup { return group }
+         guard let group = self.resolvePrivateAccessGroup?(), !group.isEmpty else {
+             throw PasscodeError.unavailable
+diff --git a/submodules/TelegramCore/BUILD b/submodules/TelegramCore/BUILD
+index 23e4e285..58dfa530 100644
+--- a/submodules/TelegramCore/BUILD
++++ b/submodules/TelegramCore/BUILD
+@@ -12,6 +12,7 @@ swift_library(
+         "-warnings-as-errors",
+     ],
+     deps = [
++        "//submodules/MoonGramCore:MoonGramCore",
+         "//submodules/TelegramApi:TelegramApi",
+         "//submodules/MtProtoKit:MtProtoKit",
+         "//submodules/MediaPreuploadRegistry:MediaPreuploadRegistry",
+diff --git a/submodules/TelegramCore/Sources/Account/Account.swift b/submodules/TelegramCore/Sources/Account/Account.swift
+index 510cb791..440dfbec 100644
+--- a/submodules/TelegramCore/Sources/Account/Account.swift
++++ b/submodules/TelegramCore/Sources/Account/Account.swift
+@@ -1375,7 +1375,9 @@ public class Account {
+         
+         self.contactSyncManager = ContactSyncManager(postbox: postbox, network: network, accountPeerId: peerId, stateManager: self.stateManager)
+         self.localInputActivityManager = PeerInputActivityManager()
+-        self.accountPresenceManager = AccountPresenceManager(shouldKeepOnlinePresence: self.shouldKeepOnlinePresence.get(), network: network)
++        let moonOnlinePresence = combineLatest(self.shouldKeepOnlinePresence.get(), moonPrivacySignal(peerId))
++        |> map { requested, privacy in requested && !privacy.hideOnline }
++        self.accountPresenceManager = AccountPresenceManager(shouldKeepOnlinePresence: moonOnlinePresence, network: network)
+         #if os(iOS)
+         // iOS only for now: the Rust engine is the macOS default, and its online keepalive cadence
+         // (pings every 1-2 s while the account is in front) has not been measured there.
+diff --git a/submodules/TelegramCore/Sources/State/AccountViewTracker.swift b/submodules/TelegramCore/Sources/State/AccountViewTracker.swift
+index 964f7602..9863a8fb 100644
+--- a/submodules/TelegramCore/Sources/State/AccountViewTracker.swift
++++ b/submodules/TelegramCore/Sources/State/AccountViewTracker.swift
+@@ -981,6 +981,7 @@ public final class AccountViewTracker {
+                     
+                     if let account = self.account {
+                         let signal = (account.postbox.transaction { transaction -> Signal<Void, NoError> in
++                            if moonPrivacy(account.peerId).hideReadReceipts { return .complete() }
+                             if let peer = transaction.getPeer(peerId), let inputPeer = apiInputPeer(peer) {
+                                 let request: Signal<Bool, MTRpcError>
+                                 switch inputPeer {
+diff --git a/submodules/TelegramCore/Sources/State/ManagedConsumePersonalMessagesActions.swift b/submodules/TelegramCore/Sources/State/ManagedConsumePersonalMessagesActions.swift
+index bb453264..2bed6de1 100644
+--- a/submodules/TelegramCore/Sources/State/ManagedConsumePersonalMessagesActions.swift
++++ b/submodules/TelegramCore/Sources/State/ManagedConsumePersonalMessagesActions.swift
+@@ -253,8 +253,7 @@ func managedReadReactionOrPollVoteActions(postbox: Postbox, network: Network, st
+ 
+ private func synchronizeConsumeMessageContents(transaction: Transaction, postbox: Postbox, network: Network, stateManager: AccountStateManager, id: MessageId) -> Signal<Void, NoError> {
+     if id.peerId.namespace == Namespaces.Peer.CloudUser || id.peerId.namespace == Namespaces.Peer.CloudGroup {
+-        return network.request(Api.functions.messages.readMessageContents(id: [id.id]))
+-            |> map(Optional.init)
++        return moonReadReceipt(accountPeerId: stateManager.accountPeerId) { network.request(Api.functions.messages.readMessageContents(id: [id.id])) }
+             |> `catch` { _ -> Signal<Api.messages.AffectedMessages?, NoError> in
+                 return .single(nil)
+             }
+@@ -288,7 +287,8 @@ private func synchronizeConsumeMessageContents(transaction: Transaction, postbox
+             }
+     } else if id.peerId.namespace == Namespaces.Peer.CloudChannel {
+         if let peer = transaction.getPeer(id.peerId), let inputChannel = apiInputChannel(peer) {
+-            return network.request(Api.functions.channels.readMessageContents(channel: inputChannel, id: [id.id]))
++            return moonReadReceipt(accountPeerId: stateManager.accountPeerId) { network.request(Api.functions.channels.readMessageContents(channel: inputChannel, id: [id.id])) }
++                |> map { $0 ?? .boolFalse }
+                 |> `catch` { _ -> Signal<Api.Bool, NoError> in
+                     return .single(.boolFalse)
+                 } |> mapToSignal { result -> Signal<Void, NoError> in
+@@ -322,8 +322,7 @@ private func synchronizeConsumeMessageContents(transaction: Transaction, postbox
+ 
+ private func synchronizeReadMessageReactionsOrPollVotes(transaction: Transaction, postbox: Postbox, network: Network, stateManager: AccountStateManager, id: MessageId) -> Signal<Void, NoError> {
+     if id.peerId.namespace == Namespaces.Peer.CloudUser || id.peerId.namespace == Namespaces.Peer.CloudGroup {
+-        return network.request(Api.functions.messages.readMessageContents(id: [id.id]))
+-        |> map(Optional.init)
++        return moonReadReceipt(accountPeerId: stateManager.accountPeerId) { network.request(Api.functions.messages.readMessageContents(id: [id.id])) }
+         |> `catch` { _ -> Signal<Api.messages.AffectedMessages?, NoError> in
+             return .single(nil)
+         }
+@@ -365,7 +364,8 @@ private func synchronizeReadMessageReactionsOrPollVotes(transaction: Transaction
+         }
+     } else if id.peerId.namespace == Namespaces.Peer.CloudChannel {
+         if let peer = transaction.getPeer(id.peerId), let inputChannel = apiInputChannel(peer) {
+-            return network.request(Api.functions.channels.readMessageContents(channel: inputChannel, id: [id.id]))
++            return moonReadReceipt(accountPeerId: stateManager.accountPeerId) { network.request(Api.functions.channels.readMessageContents(channel: inputChannel, id: [id.id])) }
++            |> map { $0 ?? .boolFalse }
+             |> `catch` { _ -> Signal<Api.Bool, NoError> in
+                 return .single(.boolFalse)
+             }
+diff --git a/submodules/TelegramCore/Sources/State/ManagedLocalInputActivities.swift b/submodules/TelegramCore/Sources/State/ManagedLocalInputActivities.swift
+index e8e08874..7920da42 100644
+--- a/submodules/TelegramCore/Sources/State/ManagedLocalInputActivities.swift
++++ b/submodules/TelegramCore/Sources/State/ManagedLocalInputActivities.swift
+@@ -143,6 +143,10 @@ private func actionFromActivity(_ activity: PeerInputActivity?) -> Api.SendMessa
+ 
+ private func requestActivity(postbox: Postbox, network: Network, accountPeerId: PeerId, peerId: PeerId, threadId: Int64?, activity: PeerInputActivity?) -> Signal<Void, NoError> {
+     return postbox.transaction { transaction -> Signal<Void, NoError> in
++        if moonPrivacy(accountPeerId).hideTyping, let activity {
++            // Cancellation must still clear an earlier indicator. Group-call speaking is independent.
++            if activity != .speakingInGroupCall { return .complete() }
++        }
+         if let peer = transaction.getPeer(peerId) {
+             if peerId == accountPeerId {
+                 return .complete()
+diff --git a/submodules/TelegramCore/Sources/State/ManagedSynchronizeConsumeMessageContentsOperations.swift b/submodules/TelegramCore/Sources/State/ManagedSynchronizeConsumeMessageContentsOperations.swift
+index b5ede6a8..c8e8f90b 100644
+--- a/submodules/TelegramCore/Sources/State/ManagedSynchronizeConsumeMessageContentsOperations.swift
++++ b/submodules/TelegramCore/Sources/State/ManagedSynchronizeConsumeMessageContentsOperations.swift
+@@ -110,6 +110,8 @@ func managedSynchronizeConsumeMessageContentOperations(postbox: Postbox, network
+ }
+ 
+ private func synchronizeConsumeMessageContents(transaction: Transaction, network: Network, stateManager: AccountStateManager, peerId: PeerId, operation: SynchronizeConsumeMessageContentsOperation) -> Signal<Void, NoError> {
++    // Local consumption already happened; the worker removes the persisted operation next.
++    if moonPrivacy(stateManager.accountPeerId).hideReadReceipts { return .complete() }
+     if peerId.namespace == Namespaces.Peer.CloudUser || peerId.namespace == Namespaces.Peer.CloudGroup {
+         return network.request(Api.functions.messages.readMessageContents(id: operation.messageIds.map { $0.id }))
+         |> map(Optional.init)
+diff --git a/submodules/TelegramCore/Sources/State/ManagedSynchronizeMarkAllUnseenPersonalMessagesOperations.swift b/submodules/TelegramCore/Sources/State/ManagedSynchronizeMarkAllUnseenPersonalMessagesOperations.swift
+index ba2fc52d..da1dc706 100644
+--- a/submodules/TelegramCore/Sources/State/ManagedSynchronizeMarkAllUnseenPersonalMessagesOperations.swift
++++ b/submodules/TelegramCore/Sources/State/ManagedSynchronizeMarkAllUnseenPersonalMessagesOperations.swift
+@@ -117,6 +117,8 @@ private enum GetUnseenIdsError {
+ }
+ 
+ private func synchronizeMarkAllUnseen(transaction: Transaction, postbox: Postbox, network: Network, stateManager: AccountStateManager, peerId: PeerId, operation: SynchronizeMarkAllUnseenPersonalMessagesOperation) -> Signal<Void, NoError> {
++    // Local tags are handled by the interactive action; completion retires the operation log.
++    if moonPrivacy(stateManager.accountPeerId).hideReadReceipts { return .complete() }
+     guard let inputPeer = transaction.getPeer(peerId).flatMap(apiInputPeer) else {
+         return .complete()
+     }
+@@ -284,6 +286,8 @@ func managedSynchronizeMarkAllUnseenReactionsOperations(postbox: Postbox, networ
+ }
+ 
+ private func synchronizeMarkAllUnseenReactions(transaction: Transaction, postbox: Postbox, network: Network, stateManager: AccountStateManager, peerId: PeerId, operation: SynchronizeMarkAllUnseenReactionsOperation) -> Signal<Void, NoError> {
++    // Local tags are handled by the interactive action; completion retires the operation log.
++    if moonPrivacy(stateManager.accountPeerId).hideReadReceipts { return .complete() }
+     guard let peer = transaction.getPeer(peerId) else {
+         return .complete()
+     }
+@@ -380,6 +384,8 @@ func managedSynchronizeMarkAllUnseenPollVotesOperations(postbox: Postbox, networ
+ }
+ 
+ private func synchronizeMarkAllUnseenPollVotes(transaction: Transaction, postbox: Postbox, network: Network, stateManager: AccountStateManager, peerId: PeerId, operation: SynchronizeMarkAllUnseenReactionsOperation) -> Signal<Void, NoError> {
++    // Local tags are handled by the interactive action; completion retires the operation log.
++    if moonPrivacy(stateManager.accountPeerId).hideReadReceipts { return .complete() }
+     guard let peer = transaction.getPeer(peerId) else {
+         return .complete()
+     }
+diff --git a/submodules/TelegramCore/Sources/State/ManagedSynchronizeViewStoriesOperations.swift b/submodules/TelegramCore/Sources/State/ManagedSynchronizeViewStoriesOperations.swift
+index e38c0f96..3ce7bf2f 100644
+--- a/submodules/TelegramCore/Sources/State/ManagedSynchronizeViewStoriesOperations.swift
++++ b/submodules/TelegramCore/Sources/State/ManagedSynchronizeViewStoriesOperations.swift
+@@ -119,6 +119,8 @@ func managedSynchronizeViewStoriesOperations(postbox: Postbox, network: Network,
+ }
+ 
+ private func pushStoriesAreSeen(postbox: Postbox, network: Network, stateManager: AccountStateManager, peer: Peer, operation: SynchronizeViewStoriesOperation) -> Signal<Void, NoError> {
++    // The worker removes this operation after completion, including pre-existing queued views.
++    if moonPrivacy(stateManager.accountPeerId).hideStoryViews { return .complete() }
+     guard let inputPeer = apiInputPeer(peer) else {
+         return .complete()
+     }
+diff --git a/submodules/TelegramCore/Sources/State/SynchronizePeerReadState.swift b/submodules/TelegramCore/Sources/State/SynchronizePeerReadState.swift
+index b2e65895..8ab6ac6e 100644
+--- a/submodules/TelegramCore/Sources/State/SynchronizePeerReadState.swift
++++ b/submodules/TelegramCore/Sources/State/SynchronizePeerReadState.swift
+@@ -425,6 +425,12 @@ private func pushPeerReadState(network: Network, postbox: Postbox, stateManager:
+ }
+ 
+ func synchronizePeerReadState(network: Network, postbox: Postbox, stateManager: AccountStateManager, peerId: PeerId, push: Bool, validate: Bool) -> Signal<Never, PeerReadStateValidationError> {
++    // Retire the pending cloud operation while preserving local read markers.
++    // Returning complete without confirmation would restart this persisted operation forever.
++    if (peerId.namespace == Namespaces.Peer.CloudUser || peerId.namespace == Namespaces.Peer.CloudGroup || peerId.namespace == Namespaces.Peer.CloudChannel), moonPrivacy(stateManager.accountPeerId).hideReadReceipts {
++        return confirmSynchronized(postbox: postbox, peerId: peerId)
++        |> ignoreValues
++    }
+     // A channel the account is not a member of has no read state on the server
+     // (NonMemberChannelReadState.swift): nothing is pushed or validated, and the queued operation
+     // is confirmed so the manager does not pick it up again. This also covers paths that queue one
+diff --git a/submodules/TelegramCore/Sources/TelegramEngine/Messages/ApplyMaxReadIndexInteractively.swift b/submodules/TelegramCore/Sources/TelegramEngine/Messages/ApplyMaxReadIndexInteractively.swift
+index 0e26cab4..61a71128 100644
+--- a/submodules/TelegramCore/Sources/TelegramEngine/Messages/ApplyMaxReadIndexInteractively.swift
++++ b/submodules/TelegramCore/Sources/TelegramEngine/Messages/ApplyMaxReadIndexInteractively.swift
+@@ -200,8 +200,8 @@ func _internal_toggleForumThreadUnreadMarkInteractively(transaction: Transaction
+             transaction.setMessageHistoryThreadInfo(peerId: peerId, threadId: threadId, info: entry)
+         }
+         
+-        if peer.isForum {
+-        } else if peer.isMonoForum {
++        if peer.isForum && !moonHideReadReceipts(viewTracker.account?.peerId) {
++        } else if peer.isMonoForum && !moonHideReadReceipts(viewTracker.account?.peerId) {
+             if let inputPeer = apiInputPeer(peer), let subPeer = transaction.getPeer(PeerId(threadId)).flatMap(apiInputPeer) {
+                 let _ = network.request(Api.functions.messages.markDialogUnread(flags: 1 << 0, parentPeer: inputPeer, peer: .inputDialogPeer(.init(peer: subPeer)))).start()
+             }
+@@ -217,11 +217,11 @@ func _internal_toggleForumThreadUnreadMarkInteractively(transaction: Transaction
+                 transaction.setMessageHistoryThreadInfo(peerId: peerId, threadId: threadId, info: entry)
+             }
+             
+-            if peer.isForum {
++            if peer.isForum && !moonHideReadReceipts(viewTracker.account?.peerId) {
+                 if let inputPeer = apiInputPeer(peer) {
+                     let _ = network.request(Api.functions.messages.readDiscussion(peer: inputPeer, msgId: Int32(clamping: threadId), readMaxId: messageIndex.id.id)).start()
+                 }
+-            } else if peer.isMonoForum {
++            } else if peer.isMonoForum && !moonHideReadReceipts(viewTracker.account?.peerId) {
+                 if let inputPeer = apiInputPeer(peer), let subPeer = transaction.getPeer(PeerId(threadId)).flatMap(apiInputPeer) {
+                     let _ = network.request(Api.functions.messages.readSavedHistory(parentPeer: inputPeer, peer: subPeer, maxId: messageIndex.id.id)).start()
+                 }
+@@ -253,11 +253,11 @@ func _internal_markForumThreadAsReadInteractively(transaction: Transaction, netw
+             transaction.setMessageHistoryThreadInfo(peerId: peerId, threadId: threadId, info: entry)
+         }
+         
+-        if peer.isForum {
++        if peer.isForum && !moonHideReadReceipts(viewTracker.account?.peerId) {
+             if let inputPeer = apiInputPeer(peer) {
+                 let _ = network.request(Api.functions.messages.readDiscussion(peer: inputPeer, msgId: Int32(clamping: threadId), readMaxId: messageIndex.id.id)).start()
+             }
+-        } else if peer.isMonoForum {
++        } else if peer.isMonoForum && !moonHideReadReceipts(viewTracker.account?.peerId) {
+             if let inputPeer = apiInputPeer(peer), let subPeer = transaction.getPeer(PeerId(threadId)).flatMap(apiInputPeer) {
+                 let _ = network.request(Api.functions.messages.readSavedHistory(parentPeer: inputPeer, peer: subPeer, maxId: messageIndex.id.id)).start()
+             }
+@@ -295,11 +295,11 @@ func _internal_togglePeerUnreadMarkInteractively(transaction: Transaction, netwo
+                     transaction.setMessageHistoryThreadInfo(peerId: peerId, threadId: item.threadId, info: entry)
+                 }
+                 
+-                if peer.isForum {
++                if peer.isForum && !moonHideReadReceipts(viewTracker.account?.peerId) {
+                     if let inputPeer = apiInputPeer(peer) {
+                         let _ = network.request(Api.functions.messages.readDiscussion(peer: inputPeer, msgId: Int32(clamping: item.threadId), readMaxId: messageIndex.id.id)).start()
+                     }
+-                } else if peer.isMonoForum {
++                } else if peer.isMonoForum && !moonHideReadReceipts(viewTracker.account?.peerId) {
+                     if let inputPeer = apiInputPeer(peer), let subPeer = transaction.getPeer(PeerId(item.threadId)).flatMap(apiInputPeer) {
+                         let _ = network.request(Api.functions.messages.readSavedHistory(parentPeer: inputPeer, peer: subPeer, maxId: messageIndex.id.id)).start()
+                     }
+diff --git a/submodules/TelegramCore/Sources/TelegramEngine/Messages/MarkAllChatsAsRead.swift b/submodules/TelegramCore/Sources/TelegramEngine/Messages/MarkAllChatsAsRead.swift
+index 819a71ca..a55b4d5f 100644
+--- a/submodules/TelegramCore/Sources/TelegramEngine/Messages/MarkAllChatsAsRead.swift
++++ b/submodules/TelegramCore/Sources/TelegramEngine/Messages/MarkAllChatsAsRead.swift
+@@ -6,6 +6,16 @@ import MtProtoKit
+ 
+ 
+ func _internal_markAllChatsAsRead(postbox: Postbox, network: Network, stateManager: AccountStateManager) -> Signal<Void, NoError> {
++    if moonPrivacy(stateManager.accountPeerId).hideReadReceipts {
++        return postbox.transaction { transaction -> Void in
++            for groupId in [PeerGroupId.root, Namespaces.PeerGroup.archive] {
++                for peerId in transaction.getUnreadChatListPeerIds(groupId: groupId, filterPredicate: nil, additionalFilter: nil, stopOnFirstMatch: false) {
++                    guard peerId.namespace != Namespaces.Peer.SecretChat, let peer = transaction.getPeer(peerId) else { continue }
++                    _internal_readPeerHistoryToTopInteractively(transaction: transaction, peer: peer, principalNamespace: Namespaces.Message.Cloud)
++                }
++            }
++        }
++    }
+     return network.request(Api.functions.messages.getDialogUnreadMarks(flags: 0, parentPeer: nil))
+     |> map(Optional.init)
+     |> `catch` { _ -> Signal<[Api.DialogPeer]?, NoError> in
+diff --git a/submodules/TelegramCore/Sources/TelegramEngine/Messages/ReplyThreadHistory.swift b/submodules/TelegramCore/Sources/TelegramEngine/Messages/ReplyThreadHistory.swift
+index 04945389..138ae29f 100644
+--- a/submodules/TelegramCore/Sources/TelegramEngine/Messages/ReplyThreadHistory.swift
++++ b/submodules/TelegramCore/Sources/TelegramEngine/Messages/ReplyThreadHistory.swift
+@@ -388,6 +388,10 @@ private class ReplyThreadHistoryContextImpl {
+                 }
+             }
+ 
++            if moonPrivacy(strongSelf.account.peerId).hideReadReceipts {
++                strongSelf.readDisposable.set(nil)
++                return
++            }
+             if let subPeerId {
+                 let signal = strongSelf.account.network.request(Api.functions.messages.readSavedHistory(parentPeer: inputPeer, peer: subPeerId, maxId: messageIndex.id.id))
+                 |> `catch` { _ -> Signal<Api.Bool, NoError> in
+diff --git a/submodules/TelegramCore/Sources/TelegramEngine/Messages/Stories.swift b/submodules/TelegramCore/Sources/TelegramEngine/Messages/Stories.swift
+index e74f2074..ba69bbe9 100644
+--- a/submodules/TelegramCore/Sources/TelegramEngine/Messages/Stories.swift
++++ b/submodules/TelegramCore/Sources/TelegramEngine/Messages/Stories.swift
+@@ -2109,6 +2109,7 @@ func _internal_deleteStories(account: Account, peerId: PeerId, ids: [Int32]) ->
+ 
+ func _internal_markStoryAsSeen(account: Account, peerId: PeerId, id: Int32, asPinned: Bool) -> Signal<Never, NoError> {
+     if asPinned {
++        if moonPrivacy(account.peerId).hideStoryViews { return .complete() }
+         return account.postbox.transaction { transaction -> Api.InputPeer? in
+             return transaction.getPeer(peerId).flatMap(apiInputPeer)
+         }
+@@ -2139,7 +2140,9 @@ func _internal_markStoryAsSeen(account: Account, peerId: PeerId, id: Int32, asPi
+             
+             #if DEBUG && false
+             #else
+-            _internal_addSynchronizeViewStoriesOperation(peerId: peerId, storyId: id, transaction: transaction)
++            if !moonPrivacy(account.peerId).hideStoryViews {
++                _internal_addSynchronizeViewStoriesOperation(peerId: peerId, storyId: id, transaction: transaction)
++            }
+             #endif
+             
+             return transaction.getPeer(peerId).flatMap(apiInputUser)
+diff --git a/submodules/TelegramUI/BUILD b/submodules/TelegramUI/BUILD
+index 116004c3..cd9c0752 100644
+--- a/submodules/TelegramUI/BUILD
++++ b/submodules/TelegramUI/BUILD
+@@ -52,7 +52,10 @@ swift_library(
+     ]),
+     copts = [
+         "-warnings-as-errors",
+-    ],
++    ] + select({
++        "//Telegram:moongramStandaloneSetting": ["-DMOONGRAM_STANDALONE"],
++        "//conditions:default": [],
++    }),
+     # DEBUG builds only: widget-sandbox's conformance set and the client's game examples, for Debug Settings' widget insertion
+     # (DebugSettingsUI/Sources/WidgetDebugPosts.swift reads them from this framework's bundle).
+     data = select({
+diff --git a/submodules/TelegramUI/Components/Chat/ChatMessageItemImpl/BUILD b/submodules/TelegramUI/Components/Chat/ChatMessageItemImpl/BUILD
+index 2997c5e4..db27e5e9 100644
+--- a/submodules/TelegramUI/Components/Chat/ChatMessageItemImpl/BUILD
++++ b/submodules/TelegramUI/Components/Chat/ChatMessageItemImpl/BUILD
+@@ -10,6 +10,7 @@ swift_library(
+         "-warnings-as-errors",
+     ],
+     deps = [
++        "//submodules/MoonGramBridge",
+         "//submodules/TelegramUI/Components/StaticGlassBackground",
+         "//submodules/TelegramUI/Components/GlassBackgroundComponent",
+         "//submodules/AsyncDisplayKit",
+diff --git a/submodules/TelegramUI/Components/Chat/ChatMessageItemImpl/Sources/ChatMessageItemImpl.swift b/submodules/TelegramUI/Components/Chat/ChatMessageItemImpl/Sources/ChatMessageItemImpl.swift
+index 46d9a7f5..1bf7aa9d 100644
+--- a/submodules/TelegramUI/Components/Chat/ChatMessageItemImpl/Sources/ChatMessageItemImpl.swift
++++ b/submodules/TelegramUI/Components/Chat/ChatMessageItemImpl/Sources/ChatMessageItemImpl.swift
+@@ -1,4 +1,5 @@
+ import Foundation
++import MoonGramBridge
+ import UIKit
+ import AsyncDisplayKit
+ import Display
+@@ -114,6 +115,14 @@ public final class ChatMessageItemImpl: ChatMessageItem, CustomStringConvertible
+         self.content = content
+         self.disableDate = disableDate || !controllerInteraction.chatIsRotated
+         self.additionalContent = additionalContent
++
++        if !presentationData.isPreview {
++            if case .messageOptions = associatedData.subject {
++                // Synthetic editor/forward previews are outside the experiment.
++            } else {
++                for (message, _) in content { MoonVaultBridge.loadedMessage(context: context, message: message) }
++            }
++        }
+         
+         var isMessageOptions = false
+         if case .messageOptions = associatedData.subject {
+diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/BUILD b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/BUILD
+index bd33bb7f..5f0278cf 100644
+--- a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/BUILD
++++ b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/BUILD
+@@ -10,6 +10,9 @@ swift_library(
+         "-warnings-as-errors",
+     ],
+     deps = [
++        "//submodules/MoonGramCore",
++        "//submodules/MoonGramUI",
++        "//submodules/MoonGramNativeGifts",
+         "//submodules/UrlWhitelist",
+         "//submodules/TelegramUI/Components/NavigationBarNode",
+         "//submodules/TelegramUI/Components/NavigationBarComponent",
+diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoHeaderNode.swift b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoHeaderNode.swift
+index 7751e79e..f7bb2f89 100644
+--- a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoHeaderNode.swift
++++ b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoHeaderNode.swift
+@@ -1,4 +1,5 @@
+ import Foundation
++import MoonGramCore
+ import UIKit
+ import AsyncDisplayKit
+ import Display
+@@ -705,6 +706,7 @@ final class PeerInfoHeaderNode: ASDisplayNode {
+         self.presentationData = presentationData
+         
+         let premiumConfiguration = PremiumConfiguration.with(appConfiguration: self.context.currentAppConfiguration.with { $0 })
++        let moonProfile = peer.flatMap { $0.id.namespace == Namespaces.Peer.CloudUser ? MoonStore.shared.replacementProfile(accountID: self.context.account.peerId.id._internalGetInt64Value(), peerID: $0.id.id._internalGetInt64Value()) : nil }
+         var credibilityIcon: CredibilityIcon = .none
+         var verifiedIcon: CredibilityIcon = .none
+         var statusIcon: CredibilityIcon = .none
+@@ -717,7 +719,7 @@ final class PeerInfoHeaderNode: ASDisplayNode {
+                 credibilityIcon = .scam
+             } else if let emojiStatus = peer.emojiStatus {
+                 statusIcon = .emojiStatus(emojiStatus)
+-            } else if peer.isPremium && !premiumConfiguration.isPremiumDisabled && (peer.id != self.context.account.peerId || self.isSettings || self.isMyProfile) {
++            } else if (peer.isPremium || (moonProfile?.localPremium ?? false)) && !premiumConfiguration.isPremiumDisabled && (peer.id != self.context.account.peerId || self.isSettings || self.isMyProfile) {
+                 credibilityIcon = .premium
+             } else {
+                 credibilityIcon = .none
+@@ -1267,7 +1269,7 @@ final class PeerInfoHeaderNode: ASDisplayNode {
+         var panelSubtitleString: (text: String, attributes: MultiScaleTextState.Attributes)?
+         let usernameString: (text: String, attributes: MultiScaleTextState.Attributes)
+         if let peer = peer {
+-            isPremium = peer.isPremium
++            isPremium = peer.isPremium || (moonProfile?.localPremium ?? false)
+             isVerified = peer.isVerified
+             isFake = peer.isFake || peer.isScam
+         }
+@@ -1306,16 +1308,24 @@ final class PeerInfoHeaderNode: ASDisplayNode {
+                 }
+             }
+ 
++            if let displayName = moonProfile?.displayName, !displayName.isEmpty, !displayStandardTitle {
++                title = displayName
++            }
+             titleStringText = title
+             titleAttributes = MultiScaleTextState.Attributes(font: Font.medium(28.0), color: .white)
+             smallTitleAttributes = MultiScaleTextState.Attributes(font: Font.medium(28.0), color: .white, shadowColor: titleShadowColor)
+             
+             if self.isSettings, case let .user(user) = peer {
+-                var subtitle = formatPhoneNumber(context: self.context, number: user.phone ?? "")
++                let moonNumber = moonProfile?.collectibleNumber ?? ""
++                let displayPhone = moonNumber.isEmpty ? formatPhoneNumber(context: self.context, number: user.phone ?? "") : moonNumber
++                var subtitle = displayPhone
+                 
+                 if let mainUsername = user.addressName, !mainUsername.isEmpty {
+                     subtitle = "\(subtitle) • @\(mainUsername)"
+                 }
++                if let username = moonProfile?.username, !username.isEmpty {
++                    subtitle = "\(displayPhone) • @\(username.trimmingCharacters(in: CharacterSet(charactersIn: "@")))"
++                }
+                 subtitleStringText = subtitle
+                 subtitleAttributes = MultiScaleTextState.Attributes(font: Font.regular(17.0), color: .white)
+                 smallSubtitleAttributes = MultiScaleTextState.Attributes(font: Font.regular(16.0), color: .white, shadowColor: titleShadowColor)
+diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoProfileItems.swift b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoProfileItems.swift
+index 08e627e3..8297945e 100644
+--- a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoProfileItems.swift
++++ b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoProfileItems.swift
+@@ -1,4 +1,7 @@
+ import Foundation
++import MoonGramCore
++import MoonGramUI
++import MoonGramNativeGifts
+ import UIKit
+ import Display
+ import AccountContext
+@@ -44,6 +47,7 @@ enum InfoSection: Int, CaseIterable {
+     case groupLocation
+     case calls
+     case personalChannel
++    case moonGram
+     case peerInfo
+     case agentProviders
+     case balances
+@@ -98,6 +102,21 @@ func infoItems(
+     }
+     
+     if case let .user(user) = data.peer {
++        let moonProfile = MoonStore.shared.visibleProfile(accountID: context.account.peerId.id._internalGetInt64Value(), peerID: user.id.id._internalGetInt64Value())
++        let moonReplacements = MoonStore.shared.replacementProfile(accountID: context.account.peerId.id._internalGetInt64Value(), peerID: user.id.id._internalGetInt64Value())
++        if let moonProfile, #available(iOS 16.0, *) {
++            if !moonProfile.collectibleNumber.isEmpty {
++                items[.moonGram]!.append(PeerInfoScreenLabeledValueItem(id: "moonNumber", label: "Номер MoonGram", text: moonProfile.collectibleNumber, action: nil, requestLayout: { interaction.requestLayout($0) }))
++            }
++            if !moonProfile.username.isEmpty {
++                items[.moonGram]!.append(PeerInfoScreenLabeledValueItem(id: "moonUsername", label: "Username MoonGram", text: "@\(moonProfile.username.trimmingCharacters(in: CharacterSet(charactersIn: "@")))", action: nil, requestLayout: { interaction.requestLayout($0) }))
++            }
++            items[.moonGram]!.append(PeerInfoScreenDisclosureItem(id: "moonCollection", label: .text("\(moonProfile.gifts.count)"), text: "Коллекции MoonGram", icon: UIImage(systemName: "moon.stars.fill"), action: {
++                Task { @MainActor in
++                    interaction.getController()?.present(MoonGramScreen(accountID: context.account.peerId.id._internalGetInt64Value(), peerID: user.id.id._internalGetInt64Value(), nativeGifts: MoonTelegramGiftProvider(context: context)), in: .window(.root))
++                }
++            }))
++        }
+         let ItemCallList = 1000
+         let ItemPersonalChannelHeader = 2000
+         let ItemPersonalChannel = 2001
+@@ -177,7 +196,7 @@ func infoItems(
+             ))
+         }
+         
+-        if let phone = user.phone {
++        if moonReplacements?.collectibleNumber.isEmpty != false, let phone = user.phone {
+             let formattedPhone = formatPhoneNumber(context: context, number: phone)
+             let label: String
+             if formattedPhone.hasPrefix("+888 ") {
+@@ -193,7 +212,7 @@ func infoItems(
+                 interaction.requestLayout(animated)
+             }))
+         }
+-        if let mainUsername = user.addressName {
++        if moonReplacements?.username.isEmpty != false, let mainUsername = user.addressName {
+             var additionalUsernames: String?
+             let usernames = user.usernames.filter { $0.isActive && $0.username != mainUsername }
+             if !usernames.isEmpty {
+diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreen.swift b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreen.swift
+index 463ab663..ed76f1bd 100644
+--- a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreen.swift
++++ b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreen.swift
+@@ -1,4 +1,6 @@
+ import Foundation
++import MoonGramCore
++import MoonGramUI
+ import UIKit
+ import Display
+ import AsyncDisplayKit
+@@ -162,6 +164,7 @@ enum PeerInfoContextSubject {
+ }
+ 
+ enum PeerInfoSettingsSection {
++    case moonGram
+     case avatar
+     case edit
+     case proxy
+@@ -235,6 +238,7 @@ final class PeerInfoScrollNode: ASScrollNode {
+ }
+ 
+ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodeProtocol, ASScrollViewDelegate {
++    private var moonGramObserver: NSObjectProtocol?
+     weak var controller: PeerInfoScreenImpl?
+     
+     let context: AccountContext
+@@ -2746,6 +2750,7 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
+     }
+     
+     deinit {
++        if let observer = self.moonGramObserver { NotificationCenter.default.removeObserver(observer) }
+         self.dataDisposable?.dispose()
+         self.walletStickersPreloadDisposable.dispose()
+         self.hiddenMediaDisposable?.dispose()
+@@ -2783,6 +2788,13 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
+     
+     override func didLoad() {
+         super.didLoad()
++        if #available(iOS 16.0, *), self.peerId.namespace == Namespaces.Peer.CloudUser {
++            moonRefreshFriendProfile(accountID: self.context.account.peerId.id._internalGetInt64Value(), peerID: self.peerId.id._internalGetInt64Value())
++        }
++        self.moonGramObserver = NotificationCenter.default.addObserver(forName: .moonGramSettingsDidChange, object: nil, queue: .main) { [weak self] notification in
++            guard let self, let accountID = notification.userInfo?["accountID"] as? Int64, accountID == self.context.account.peerId.id._internalGetInt64Value() else { return }
++            self.requestLayout(animated: false)
++        }
+                 
+         self.view.disablesInteractiveTransitionGestureRecognizerNow = { [weak self] in
+             if let strongSelf = self {
+diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenSettingsActions.swift b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenSettingsActions.swift
+index bb413618..31d96b47 100644
+--- a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenSettingsActions.swift
++++ b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenSettingsActions.swift
+@@ -1,4 +1,6 @@
+ import Foundation
++import MoonGramUI
++import MoonGramNativeGifts
+ import UIKit
+ import Display
+ import AccountContext
+@@ -52,6 +54,13 @@ extension PeerInfoScreenNode {
+             }
+         }
+         switch section {
++        case .moonGram:
++            if #available(iOS 16.0, *) {
++                Task { @MainActor [weak self] in
++                    guard let self else { return }
++                    self.controller?.present(MoonGramScreen(accountID: self.context.account.peerId.id._internalGetInt64Value(), nativeGifts: MoonTelegramGiftProvider(context: self.context)), in: .window(.root))
++                }
++            }
+         case .avatar:
+             self.controller?.openAvatarForEditing()
+         case .edit:
+diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoSettingsItems.swift b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoSettingsItems.swift
+index 8e3f9d25..cd243fcc 100644
+--- a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoSettingsItems.swift
++++ b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoSettingsItems.swift
+@@ -13,12 +13,14 @@ import DeviceAccess
+ import TelegramStringFormatting
+ import PeerNameColorItem
+ import WalletContext
++import MoonGramCore
+ 
+ enum SettingsSection: Int, CaseIterable {
+     case edit
+     case phone
+     case accounts
+     case myProfile
++    case moonGram
+     case wallet
+     case proxy
+     case apps
+@@ -38,6 +40,17 @@ func settingsItems(data: PeerInfoScreenData?, context: AccountContext, presentat
+     for section in SettingsSection.allCases {
+         items[section] = []
+     }
++
++    if #available(iOS 16.0, *) {
++        let enabled = (try? MoonStore.shared.settings(accountID: context.account.peerId.id._internalGetInt64Value()))?.enabled ?? false
++        items[.moonGram]!.append(PeerInfoScreenDisclosureItem(id: "moonGram", label: .text(enabled ? "Включены" : "Выключены"), text: "MoonGram", icon: UIImage(systemName: "moon.stars.fill"), action: {
++            interaction.openSettings(.moonGram)
++        }))
++        if (try? MoonStore.shared.settings(accountID: context.account.peerId.id._internalGetInt64Value()))?.effectiveDisplayMode == .both,
++           let profile = MoonStore.shared.visibleProfile(accountID: context.account.peerId.id._internalGetInt64Value(), peerID: context.account.peerId.id._internalGetInt64Value()), let stars = profile.stars {
++            items[.moonGram]!.append(PeerInfoScreenDisclosureItem(id: "moonStarsBoth", label: .text(String(stars)), text: "Stars · оформление MoonGram", icon: UIImage(systemName: "star"), action: { interaction.openSettings(.moonGram) }))
++        }
++    }
+     
+     let setPhotoTitle: String
+     if let peer = data.peer, !peer.profileImageRepresentations.isEmpty {
+@@ -288,10 +301,12 @@ func settingsItems(data: PeerInfoScreenData?, context: AccountContext, presentat
+         }))
+     }
+     if let starsState = data.starsState {
++        let moonStars = MoonStore.shared.replacementProfile(accountID: context.account.peerId.id._internalGetInt64Value(), peerID: context.account.peerId.id._internalGetInt64Value())?.stars
++        let displayBalance = moonStars.map { StarsAmount(value: $0, nanos: 0) } ?? starsState.balance
+         if !isPremiumDisabled || abs(starsState.balance.value) > 0 {
+             let balanceText: NSAttributedString
+-            if abs(starsState.balance.value) > 0 {
+-                let formattedLabel = formatStarsAmountText(starsState.balance, dateTimeFormat: presentationData.dateTimeFormat)
++            if displayBalance.value > 0 {
++                let formattedLabel = formatStarsAmountText(displayBalance, dateTimeFormat: presentationData.dateTimeFormat)
+                 let smallLabelFont = Font.regular(floor(presentationData.listsFontSize.itemListBaseFontSize / 17.0 * 13.0))
+                 let labelFont = Font.regular(presentationData.listsFontSize.itemListBaseFontSize)
+                 let labelColor = presentationData.theme.list.itemSecondaryTextColor
+diff --git a/submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/BUILD b/submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/BUILD
+index 53a80f32..fdb3e360 100644
+--- a/submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/BUILD
++++ b/submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/BUILD
+@@ -10,6 +10,7 @@ swift_library(
+         "-warnings-as-errors",
+     ],
+     deps = [
++        "//submodules/MoonGramCore",
+         "//submodules/AsyncDisplayKit",
+         "//submodules/Display",
+         "//submodules/TelegramCore",
+diff --git a/submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/Sources/StarsTransactionsScreen.swift b/submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/Sources/StarsTransactionsScreen.swift
+index b4a03995..a1d602f6 100644
+--- a/submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/Sources/StarsTransactionsScreen.swift
++++ b/submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/Sources/StarsTransactionsScreen.swift
+@@ -1,4 +1,5 @@
+ import Foundation
++import MoonGramCore
+ import UIKit
+ import Display
+ import AsyncDisplayKit
+@@ -153,6 +154,7 @@ final class StarsTransactionsScreenComponent: Component {
+         private var ignoreScrolling: Bool = false
+         
+         private var stateDisposable: Disposable?
++        private var moonGramObserver: NSObjectProtocol?
+         private var starsState: StarsContext.State?
+         
+         private var revenueStateDisposable: Disposable?
+@@ -221,6 +223,7 @@ final class StarsTransactionsScreenComponent: Component {
+         }
+         
+         deinit {
++            if let observer = self.moonGramObserver { NotificationCenter.default.removeObserver(observer) }
+             self.stateDisposable?.dispose()
+             self.revenueStateDisposable?.dispose()
+             self.subscriptionsStateDisposable?.dispose()
+@@ -380,6 +383,14 @@ final class StarsTransactionsScreenComponent: Component {
+             
+             self.component = component
+             self.state = state
++            if self.moonGramObserver == nil {
++                self.moonGramObserver = NotificationCenter.default.addObserver(forName: .moonGramSettingsDidChange, object: nil, queue: .main) { [weak self] notification in
++                    guard let self, let current = self.component,
++                          let accountID = notification.userInfo?["accountID"] as? Int64,
++                          accountID == current.context.account.peerId.id._internalGetInt64Value() else { return }
++                    self.state?.updated(transition: .immediate)
++                }
++            }
+             
+             var balanceUpdated = false
+             if let starsState = self.starsState {
+@@ -559,7 +570,7 @@ final class StarsTransactionsScreenComponent: Component {
+             }
+             
+             let titleString: String
+-            let descriptionString: String
++            var descriptionString: String
+             if component.starsContext.ton {
+                 titleString = environment.strings.Stars_Ton_Title
+                 descriptionString = environment.strings.Stars_Ton_Description
+@@ -567,6 +578,11 @@ final class StarsTransactionsScreenComponent: Component {
+                 titleString = environment.strings.Stars_Intro_Title
+                 descriptionString = environment.strings.Stars_Intro_Description
+             }
++            if !component.starsContext.ton,
++               (try? MoonStore.shared.settings(accountID: component.context.account.peerId.id._internalGetInt64Value()))?.effectiveDisplayMode == .both,
++               let visualStars = MoonStore.shared.visibleProfile(accountID: component.context.account.peerId.id._internalGetInt64Value(), peerID: component.context.account.peerId.id._internalGetInt64Value())?.stars {
++                descriptionString += "\n\nMoonGram · визуальные Stars: \(visualStars)"
++            }
+                        
+             let titleSize = self.titleView.update(
+                 transition: .immediate,
+@@ -607,10 +623,12 @@ final class StarsTransactionsScreenComponent: Component {
+             )
+             
+             let formattedBalance: String
++            let moonStars = MoonStore.shared.replacementProfile(accountID: component.context.account.peerId.id._internalGetInt64Value(), peerID: component.context.account.peerId.id._internalGetInt64Value())?.stars
++            let displayBalance = !component.starsContext.ton ? (moonStars.map { StarsAmount(value: $0, nanos: 0) } ?? self.starsState?.balance ?? StarsAmount.zero) : (self.starsState?.balance ?? StarsAmount.zero)
+             if component.starsContext.ton {
+                 formattedBalance = formatTonAmountText(self.starsState?.balance.value ?? 0, dateTimeFormat: environment.dateTimeFormat)
+             } else {
+-                formattedBalance = formatStarsAmountText(self.starsState?.balance ?? StarsAmount.zero, dateTimeFormat: environment.dateTimeFormat)
++                formattedBalance = formatStarsAmountText(displayBalance, dateTimeFormat: environment.dateTimeFormat)
+             }
+             let smallLabelFont = Font.regular(11.0)
+             let labelFont = Font.semibold(14.0)
+@@ -809,7 +827,7 @@ final class StarsTransactionsScreenComponent: Component {
+                             theme: environment.theme,
+                             strings: environment.strings,
+                             dateTimeFormat: environment.dateTimeFormat,
+-                            count: self.starsState?.balance ?? StarsAmount.zero,
++                            count: displayBalance,
+                             currency: component.starsContext.ton ? .ton : .stars,
+                             rate: nil,
+                             actionTitle: component.starsContext.ton ? environment.strings.Ton_WithdrawViaFragment : (withdrawAvailable ? environment.strings.Stars_Intro_BuyShort : environment.strings.Stars_Intro_Buy),
+diff --git a/submodules/TelegramUI/Sources/AppDelegate.swift b/submodules/TelegramUI/Sources/AppDelegate.swift
+index cf304286..d5226e64 100644
+--- a/submodules/TelegramUI/Sources/AppDelegate.swift
++++ b/submodules/TelegramUI/Sources/AppDelegate.swift
+@@ -310,11 +310,11 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
+             return existingSession
+         }
+         
+-        let baseAppBundleId = Bundle.main.bundleIdentifier!
+-        let appGroupName = "group.\(baseAppBundleId)"
+-
+         let configuration = URLSessionConfiguration.background(withIdentifier: identifier)
+-        configuration.sharedContainerIdentifier = appGroupName
++        #if !MOONGRAM_STANDALONE
++        let baseAppBundleId = Bundle.main.bundleIdentifier!
++        configuration.sharedContainerIdentifier = "group.\(baseAppBundleId)"
++        #endif
+         configuration.isDiscretionary = false
+         let session = URLSession(configuration: configuration, delegate: self, delegateQueue: .main)
+         self.urlSessions.append(session)
+@@ -565,10 +565,30 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
+         
+         let baseAppBundleId = Bundle.main.bundleIdentifier!
+         let appGroupName = "group.\(baseAppBundleId)"
+-        try! PasscodeEnvironment.shared.configure(PasscodeConfiguration(appGroupIdentifier: appGroupName, processRole: .mainApp, biometricKeychainService: walletBiometricKeychainService), privateAccessGroup: {
++        let passcodeConfiguration: PasscodeConfiguration
++        let maybeAppGroupUrl: URL?
++        #if MOONGRAM_STANDALONE
++        guard baseAppBundleId.hasSuffix(".personal") else {
++            self.mainWindow?.presentNative(UIAlertController(title: "MoonGram", message: "Переподпишите личную сборку без изменения Bundle ID.", preferredStyle: .alert))
++            return true
++        }
++        passcodeConfiguration = PasscodeConfiguration(appGroupIdentifier: appGroupName, processRole: .mainApp, biometricKeychainService: walletBiometricKeychainService, storageScope: .applicationOnly)
++        do {
++            let base = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
++                .appendingPathComponent("MoonGramStandalone", isDirectory: true)
++            try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700, .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
++            maybeAppGroupUrl = base
++        } catch {
++            self.mainWindow?.presentNative(UIAlertController(title: "MoonGram", message: "Не удалось открыть локальное хранилище приложения.", preferredStyle: .alert))
++            return true
++        }
++        #else
++        passcodeConfiguration = PasscodeConfiguration(appGroupIdentifier: appGroupName, processRole: .mainApp, biometricKeychainService: walletBiometricKeychainService)
++        maybeAppGroupUrl = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupName)
++        #endif
++        try! PasscodeEnvironment.shared.configure(passcodeConfiguration, privateAccessGroup: {
+             BuildConfig.keychainAccessGroup(baseAppBundleId: baseAppBundleId)
+         })
+-        let maybeAppGroupUrl = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupName)
+         
+         let buildConfig = BuildConfig(baseAppBundleId: baseAppBundleId)
+         self.buildConfig = buildConfig
+@@ -721,9 +741,22 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
+         } else {
+             rootPath = rootPathForBasePath(appGroupUrl.path)
+         }
++        #if MOONGRAM_STANDALONE
++        do {
++            var rootURL = URL(fileURLWithPath: rootPath, isDirectory: true)
++            try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700, .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
++            var values = URLResourceValues()
++            values.isExcludedFromBackup = true
++            try rootURL.setResourceValues(values)
++        } catch {
++            self.mainWindow?.presentNative(UIAlertController(title: "MoonGram", message: "Не удалось подготовить защищённое хранилище.", preferredStyle: .alert))
++            return true
++        }
++        #else
+         if !isUITest {
+             performAppGroupUpgrades(appGroupPath: appGroupUrl.path, rootPath: rootPath)
+         }
++        #endif
+         
+         let deviceSpecificEncryptionParameters = BuildConfig.deviceSpecificEncryptionParameters(rootPath, baseAppBundleId: baseAppBundleId)
+         let encryptionParameters = ValueBoxEncryptionParameters(forceEncryptionIfNoSet: false, key: ValueBoxEncryptionParameters.Key(data: deviceSpecificEncryptionParameters.key)!, salt: ValueBoxEncryptionParameters.Salt(data: deviceSpecificEncryptionParameters.salt)!)

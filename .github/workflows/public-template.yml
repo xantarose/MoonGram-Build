@@ -1,0 +1,45 @@
+name: MoonGram public template (no private API keys)
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: 'Template for local configuration, or simulator launch check'
+        type: choice
+        options: [standalone-device, standalone-simulator]
+        default: standalone-device
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 180
+    env:
+      BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare nonfunctional placeholder API values
+        env:
+          BUILD_KIND: ${{ inputs.kind }}
+        run: python3 tools/build_configuration.py --kind "$BUILD_KIND" --template
+      - name: Build without real Telegram API credentials
+        env:
+          BUILD_KIND: ${{ inputs.kind }}
+        run: python3 tools/build.py --configuration build.local.json --kind "$BUILD_KIND" --template --build-number "$((1000 + BUILD_NUMBER))"
+      - name: Launch the complete simulator template
+        if: inputs.kind == 'standalone-simulator'
+        run: python3 tools/smoke_full_client.py --ipa dist/MoonGram-template-personal-simulator.ipa
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: MoonGram-public-template-${{ inputs.kind }}
+          path: |
+            dist/MoonGram-template*.ipa
+            dist/MoonGram-template*.json
+            dist/full-smoke/
+          if-no-files-found: ignore
+          retention-days: 3
+      - name: Remove placeholder configuration
+        if: always()
+        run: python3 -c 'from pathlib import Path; Path("build.local.json").unlink(missing_ok=True)'

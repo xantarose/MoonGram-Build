@@ -1,0 +1,6 @@
+{
+  "repository": "https://github.com/TelegramMessenger/Telegram-iOS.git",
+  "revision": "24638bc69bd083981b178dd1e7f921eebbf7fc46",
+  "tag": "release-13.2",
+  "rules_apple_revision": "485016eb5b0948cc17307064e7977a6d68e94046"
+}
