@@ -49,7 +49,9 @@ def main():
             if not args.kind.endswith("simulator"):
                 flags += ["--features=disable_legacy_signing", "--features=moongram_unsigned_ipa"]
             if args.kind.startswith("standalone-"):
-                flags += ["--//Telegram:moongramStandalone"]
+                # Unsigned targets do not consume signing entitlements, so Bazel
+                # would normally prune the file. Ask for it as a build output for validation.
+                flags += ["--//Telegram:moongramStandalone", "//Telegram:TelegramEntitlements.entitlements"]
             if args.template and args.kind == "standalone-device":
                 flags += ["--//Telegram:moongramRuntimeAPI"]
             command += ["--bazelArguments=" + " ".join(flags), "build", "--continueOnError", "--xcodeManagedCodesigning", "--configuration=" + configuration]
