@@ -220,6 +220,8 @@ public struct MoonSettings: Codable, Equatable, Sendable {
     public var presets: [MoonPreset]
     public var experiments: MoonExperiments?
     public var privacy: MoonPrivacySettings?
+    public var autoPublishStyle: Bool?
+    public var streaksEnabled: Bool?
     public var displayMode: MoonDisplayMode?
 
     public init() {
@@ -231,6 +233,8 @@ public struct MoonSettings: Codable, Equatable, Sendable {
         self.presets = [preset]
         self.experiments = nil
         self.privacy = nil
+        self.autoPublishStyle = nil
+        self.streaksEnabled = nil
         self.displayMode = .visual
     }
 

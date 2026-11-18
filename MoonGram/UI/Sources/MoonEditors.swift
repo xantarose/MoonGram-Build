@@ -24,7 +24,7 @@ struct MoonProfileEditor: View {
                 TextField("Имя — пусто для настоящего", text: self.$profile.displayName)
                 TextField("Декоративный username", text: self.$profile.username).textInputAutocapitalization(.never).autocorrectionDisabled()
                 TextField("Коллекционный номер", text: self.$profile.collectibleNumber).keyboardType(.phonePad)
-                Toggle("Внешний вид Premium", isOn: self.$profile.localPremium)
+                Toggle("Внешний вид Premium", isOn: self.$profile.localPremium).tint(MoonAccent.control)
             }
             Section {
                 TextField("Stars — пусто для настоящего", text: self.$stars).keyboardType(.numberPad)

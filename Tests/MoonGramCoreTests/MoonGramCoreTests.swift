@@ -3,6 +3,46 @@ import XCTest
 @testable import MoonGramCore
 
 final class MoonGramCoreTests: XCTestCase {
+    func testMonthlyStreakRestoresPersistAndDoNotCrossAccounts() throws {
+        let (store, directory) = try self.temporaryStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var settings = MoonSettings()
+        settings.streaksEnabled = true
+        try store.save(settings, accountID: 1)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let twoDaysAgo = Int32(now.timeIntervalSince1970) - 172_800
+        for peer in 10...15 {
+            let peerID = Int64(peer)
+            try store.recordStreakActivity(accountID: 1, peerID: peerID, timestamp: twoDaysAgo, incoming: false, now: now)
+            XCTAssertFalse(try store.streakSummary(accountID: 1, peerID: peerID, now: now).canRestoreYesterday)
+            try store.recordStreakActivity(accountID: 1, peerID: peerID, timestamp: twoDaysAgo, incoming: true, now: now)
+            let summary = try store.restoreStreak(accountID: 1, peerID: peerID, now: now)
+            XCTAssertEqual(summary.days, peer < 15 ? 2 : 0)
+            XCTAssertFalse(summary.canRestoreYesterday)
+        }
+        let reopened = MoonStore(directory: directory)
+        XCTAssertEqual(try reopened.streakSummary(accountID: 1, peerID: 10, now: now).remainingRestores, 0)
+        XCTAssertEqual(try reopened.streakSummary(accountID: 2, peerID: 10, now: now).remainingRestores, 5)
+        XCTAssertEqual(try reopened.streakSummary(accountID: 1, peerID: 10, now: now.addingTimeInterval(35 * 86_400)).remainingRestores, 5)
+    }
+
+    func testRemovingSyncedStylePreservesManualImport() throws {
+        let (store, directory) = try self.temporaryStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var settings = MoonSettings()
+        settings.enabled = true
+        try store.save(settings, accountID: 1)
+        var manual = MoonProfile()
+        manual.displayName = "Локальный импорт"
+        var synced = MoonProfile()
+        synced.displayName = "Публикация друга"
+        try store.importFriend(MoonArchive(profile: manual), accountID: 1, peerID: 2)
+        try store.importFriend(MoonArchive(profile: synced), accountID: 1, peerID: 2, synced: true)
+        XCTAssertEqual(store.visibleProfile(accountID: 1, peerID: 2), manual)
+        try store.removeFriend(accountID: 1, peerID: 2, synced: true)
+        XCTAssertEqual(store.visibleProfile(accountID: 1, peerID: 2), manual)
+    }
+
     func testPrivacyDefaultsMigrateAndRemainIndependentOfCosmetics() throws {
         let (store, directory) = try self.temporaryStore()
         defer { try? FileManager.default.removeItem(at: directory) }

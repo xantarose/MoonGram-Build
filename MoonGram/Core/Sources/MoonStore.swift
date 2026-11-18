@@ -20,6 +20,7 @@ public final class MoonStore: @unchecked Sendable {
     private let directory: URL
     private let lock = NSRecursiveLock()
     private var cache: [Int64: MoonSettings] = [:]
+    private var streakCache: [Int64: MoonStreakLedger] = [:]
     private let friendCache = NSCache<NSString, MoonCachedProfile>()
     private let maximumFileBytes = 16_777_216
 
@@ -71,13 +72,17 @@ public final class MoonStore: @unchecked Sendable {
         guard settings.showFriends else { return nil }
         let key = "\(accountID):\(peerID)" as NSString
         if let cached = self.friendCache.object(forKey: key) { return cached.profile }
-        let file = self.friendURL(accountID: accountID, peerID: peerID)
-        guard let data = try? self.readBounded(file, maximumBytes: MoonArchive.maximumBytes),
-              let archive = try? MoonArchive.decode(data) else {
+        let archives = [false, true].lazy.compactMap { synced -> (MoonArchive, Int)? in
+            let file = self.friendURL(accountID: accountID, peerID: peerID, synced: synced)
+            guard let data = try? self.readBounded(file, maximumBytes: MoonArchive.maximumBytes),
+                  let archive = try? MoonArchive.decode(data) else { return nil }
+            return (archive, data.count)
+        }
+        guard let (archive, byteCount) = archives.first else {
             self.friendCache.setObject(MoonCachedProfile(nil), forKey: key, cost: 1)
             return nil
         }
-        self.friendCache.setObject(MoonCachedProfile(archive.profile), forKey: key, cost: data.count)
+        self.friendCache.setObject(MoonCachedProfile(archive.profile), forKey: key, cost: byteCount)
         return archive.profile
     }
 
@@ -91,26 +96,12 @@ public final class MoonStore: @unchecked Sendable {
 
     /// The owner ID is supplied by the user's verified contact or the authenticated sync service.
     /// An imported JSON file is never accepted as proof of Telegram account ownership.
-    public func importFriend(_ archive: MoonArchive, accountID: Int64, peerID: Int64) throws {
+    public func importFriend(_ archive: MoonArchive, accountID: Int64, peerID: Int64, synced: Bool = false) throws {
         guard accountID != peerID, peerID > 0 else { throw MoonError.invalid("ID друга") }
         let data = try archive.encoded()
         self.lock.lock()
         do {
-            try self.write(data, to: self.friendURL(accountID: accountID, peerID: peerID))
-            self.friendCache.setObject(MoonCachedProfile(archive.profile), forKey: "\(accountID):\(peerID)" as NSString, cost: data.count)
-            self.lock.unlock()
-        } catch {
-            self.lock.unlock()
-            throw error
-        }
-        NotificationCenter.default.post(name: .moonGramSettingsDidChange, object: nil, userInfo: ["accountID": accountID])
-    }
-
-    public func removeFriend(accountID: Int64, peerID: Int64) throws {
-        self.lock.lock()
-        do {
-            let url = self.friendURL(accountID: accountID, peerID: peerID)
-            if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+            try self.write(data, to: self.friendURL(accountID: accountID, peerID: peerID, synced: synced))
             self.friendCache.removeObject(forKey: "\(accountID):\(peerID)" as NSString)
             self.lock.unlock()
         } catch {
@@ -120,13 +111,81 @@ public final class MoonStore: @unchecked Sendable {
         NotificationCenter.default.post(name: .moonGramSettingsDidChange, object: nil, userInfo: ["accountID": accountID])
     }
 
+    public func removeFriend(accountID: Int64, peerID: Int64, synced: Bool = false) throws {
+        self.lock.lock()
+        do {
+            let url = self.friendURL(accountID: accountID, peerID: peerID, synced: synced)
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                self.lock.unlock()
+                return
+            }
+            try FileManager.default.removeItem(at: url)
+            self.friendCache.removeObject(forKey: "\(accountID):\(peerID)" as NSString)
+            self.lock.unlock()
+        } catch {
+            self.lock.unlock()
+            throw error
+        }
+        NotificationCenter.default.post(name: .moonGramSettingsDidChange, object: nil, userInfo: ["accountID": accountID])
+    }
+
+    public func recordStreakActivity(accountID: Int64, peerID: Int64, timestamp: Int32, incoming: Bool, now: Date = Date()) throws {
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        guard accountID > 0, peerID > 0, peerID != accountID,
+              try self.settings(accountID: accountID).streaksEnabled == true else { return }
+        var ledger = try self.streakLedger(accountID: accountID)
+        if ledger.record(peerID: peerID, date: Date(timeIntervalSince1970: TimeInterval(timestamp)), incoming: incoming, now: now) {
+            try self.saveStreakLedger(ledger, accountID: accountID)
+        }
+    }
+
+    public func streakSummary(accountID: Int64, peerID: Int64, now: Date = Date()) throws -> MoonStreakSummary {
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        return try self.streakLedger(accountID: accountID).summary(peerID: peerID, now: now)
+    }
+
+    public func restoreStreak(accountID: Int64, peerID: Int64, now: Date = Date()) throws -> MoonStreakSummary {
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        var ledger = try self.streakLedger(accountID: accountID)
+        guard try self.settings(accountID: accountID).streaksEnabled == true else { return ledger.summary(peerID: peerID, now: now) }
+        if ledger.restoreYesterday(peerID: peerID, now: now) { try self.saveStreakLedger(ledger, accountID: accountID) }
+        return ledger.summary(peerID: peerID, now: now)
+    }
+
+    private func streakURL(accountID: Int64) -> URL {
+        self.directory.appendingPathComponent(String(accountID), isDirectory: true).appendingPathComponent("streaks.json")
+    }
+
+    private func streakLedger(accountID: Int64) throws -> MoonStreakLedger {
+        if let ledger = self.streakCache[accountID] { return ledger }
+        let path = self.streakURL(accountID: accountID)
+        let ledger: MoonStreakLedger
+        if FileManager.default.fileExists(atPath: path.path) {
+            ledger = try JSONDecoder().decode(MoonStreakLedger.self, from: self.readBounded(path, maximumBytes: 4_194_304))
+        } else {
+            ledger = MoonStreakLedger()
+        }
+        self.streakCache[accountID] = ledger
+        return ledger
+    }
+
+    private func saveStreakLedger(_ ledger: MoonStreakLedger, accountID: Int64) throws {
+        let data = try JSONEncoder().encode(ledger)
+        guard data.count <= 4_194_304 else { throw MoonError.tooLarge }
+        try self.write(data, to: self.streakURL(accountID: accountID))
+        self.streakCache[accountID] = ledger
+    }
+
     private func settingsURL(_ accountID: Int64) -> URL {
         self.directory.appendingPathComponent(String(accountID), isDirectory: true).appendingPathComponent("settings.json")
     }
 
-    private func friendURL(accountID: Int64, peerID: Int64) -> URL {
+    private func friendURL(accountID: Int64, peerID: Int64, synced: Bool) -> URL {
         self.directory.appendingPathComponent(String(accountID), isDirectory: true)
-            .appendingPathComponent("friends", isDirectory: true).appendingPathComponent("\(peerID).json")
+            .appendingPathComponent(synced ? "synced-friends" : "friends", isDirectory: true).appendingPathComponent("\(peerID).json")
     }
 
     private func readBounded(_ url: URL, maximumBytes: Int) throws -> Data {

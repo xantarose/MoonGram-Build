@@ -22,8 +22,8 @@ struct MoonVaultView: View {
         List {
             Section {
                 TextField("Telegram ID друга", text: self.$peerID).keyboardType(.numberPad)
-                Toggle("Копии загруженных входящих сообщений", isOn: self.$saveMessages)
-                Toggle("Копии открытых одноразовых фото и видео", isOn: self.$saveMedia)
+                Toggle("Копии загруженных входящих сообщений", isOn: self.$saveMessages).tint(MoonAccent.control)
+                Toggle("Копии открытых одноразовых фото и видео", isOn: self.$saveMedia).tint(MoonAccent.control)
                 Button("Сохранить настройки") {
                     self.model.mutate {
                         let experiments = MoonExperiments(testPeerID: Int64(self.peerID), saveLoadedMessages: self.saveMessages, saveViewOnceMedia: self.saveMedia)

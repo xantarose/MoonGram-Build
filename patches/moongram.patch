@@ -762,7 +762,7 @@ index 7751e79e..f7bb2f89 100644
                  subtitleAttributes = MultiScaleTextState.Attributes(font: Font.regular(17.0), color: .white)
                  smallSubtitleAttributes = MultiScaleTextState.Attributes(font: Font.regular(16.0), color: .white, shadowColor: titleShadowColor)
 diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoProfileItems.swift b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoProfileItems.swift
-index 08e627e3..8297945e 100644
+index 08e627e3..af0d220e 100644
 --- a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoProfileItems.swift
 +++ b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoProfileItems.swift
 @@ -1,4 +1,7 @@
@@ -781,7 +781,7 @@ index 08e627e3..8297945e 100644
      case peerInfo
      case agentProviders
      case balances
-@@ -98,6 +102,21 @@ func infoItems(
+@@ -98,6 +102,33 @@ func infoItems(
      }
      
      if case let .user(user) = data.peer {
@@ -800,10 +800,22 @@ index 08e627e3..8297945e 100644
 +                }
 +            }))
 +        }
++        if #available(iOS 16.0, *), user.botInfo == nil, user.id != context.account.peerId {
++            let accountID = context.account.peerId.id._internalGetInt64Value()
++            let peerID = user.id.id._internalGetInt64Value()
++            if (try? MoonStore.shared.settings(accountID: accountID).streaksEnabled) == true {
++                let count = (try? MoonStore.shared.streakSummary(accountID: accountID, peerID: peerID).days) ?? 0
++                items[.moonGram]!.append(PeerInfoScreenDisclosureItem(id: "moonStreak", label: count > 0 ? .text("\(count) дн.") : .none, text: "Стрик", icon: UIImage(systemName: "flame"), action: {
++                    Task { @MainActor in
++                        interaction.getController()?.present(MoonGramScreen(accountID: accountID, peerID: peerID, streak: true), in: .window(.root))
++                    }
++                }))
++            }
++        }
          let ItemCallList = 1000
          let ItemPersonalChannelHeader = 2000
          let ItemPersonalChannel = 2001
-@@ -177,7 +196,7 @@ func infoItems(
+@@ -177,7 +208,7 @@ func infoItems(
              ))
          }
          
@@ -812,7 +824,7 @@ index 08e627e3..8297945e 100644
              let formattedPhone = formatPhoneNumber(context: context, number: phone)
              let label: String
              if formattedPhone.hasPrefix("+888 ") {
-@@ -193,7 +212,7 @@ func infoItems(
+@@ -193,7 +224,7 @@ func infoItems(
                  interaction.requestLayout(animated)
              }))
          }
@@ -871,7 +883,7 @@ index 463ab663..ed76f1bd 100644
          self.view.disablesInteractiveTransitionGestureRecognizerNow = { [weak self] in
              if let strongSelf = self {
 diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenSettingsActions.swift b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenSettingsActions.swift
-index bb413618..31d96b47 100644
+index bb413618..bce2001a 100644
 --- a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenSettingsActions.swift
 +++ b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenSettingsActions.swift
 @@ -1,4 +1,6 @@
@@ -889,12 +901,35 @@ index bb413618..31d96b47 100644
 +            if #available(iOS 16.0, *) {
 +                Task { @MainActor [weak self] in
 +                    guard let self else { return }
-+                    self.controller?.present(MoonGramScreen(accountID: self.context.account.peerId.id._internalGetInt64Value(), nativeGifts: MoonTelegramGiftProvider(context: self.context)), in: .window(.root))
++                    self.controller?.present(MoonGramScreen(accountID: self.context.account.peerId.id._internalGetInt64Value(), nativeGifts: MoonTelegramGiftProvider(context: self.context), transport: moonTransportControls(context: self.context)), in: .window(.root))
 +                }
 +            }
          case .avatar:
              self.controller?.openAvatarForEditing()
          case .edit:
+@@ -377,3 +386,22 @@ extension PeerInfoScreenNode {
+         }))
+     }
+ }
++
++@available(iOS 16.0, *)
++@MainActor
++private func moonTransportControls(context: AccountContext) -> MoonTransportControls {
++    let manager = context.sharedContext.accountManager
++    return MoonTransportControls(prefersWebFallback: {
++        let data = await manager.sharedData(keys: Set([SharedDataKeys.networkEngineSettings])).get()
++        let settings = data.entries[SharedDataKeys.networkEngineSettings]?.get(NetworkEngineSettings.self) ?? NetworkEngineSettings.defaultSettings
++        return settings.engine == .rust
++    }, setWebFallback: { enabled in
++        await updateNetworkEngineSettings(accountManager: manager) { settings in
++            var settings = settings
++            settings.engine = enabled ? .rust : .mtProtoKit
++            return settings
++        }.get()
++    }, usesAlternateEngine: {
++        return context.account.network.engineKind == .rust
++    })
++}
 diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoSettingsItems.swift b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoSettingsItems.swift
 index 8e3f9d25..cd243fcc 100644
 --- a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoSettingsItems.swift

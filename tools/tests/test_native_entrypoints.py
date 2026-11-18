@@ -25,8 +25,10 @@ struct Account { let peerId = PeerID() }
 struct Context { let account = Account() }
 struct User { let id = PeerID() }
 @MainActor final class MoonTelegramGiftProvider { init(context: Context) {} }
+struct MoonTransportControls {}
+@MainActor func moonTransportControls(context: Context) -> MoonTransportControls { MoonTransportControls() }
 struct MoonGramScreen {
-    init(accountID: Int64, peerID: Int64? = nil, nativeGifts: MoonTelegramGiftProvider) {}
+    init(accountID: Int64, peerID: Int64? = nil, nativeGifts: MoonTelegramGiftProvider, transport: MoonTransportControls? = nil) {}
 }
 enum Root { case root }
 enum Surface { case window(Root) }

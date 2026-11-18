@@ -8,9 +8,23 @@ import TelegramCore
 
 public enum MoonVaultBridge {
     private static let observers = MoonDeletionObservers()
+    private static let streakUpdates = DispatchQueue(label: "app.moongram.streaks", qos: .utility)
 
     public static func loadedMessage(context: AccountContext, message: EngineRawMessage) {
         let accountID = context.account.peerId.id._internalGetInt64Value()
+        if message.id.namespace == Namespaces.Message.Cloud,
+           message.id.peerId.namespace == Namespaces.Peer.CloudUser,
+           message.id.peerId != context.account.peerId,
+           (try? MoonStore.shared.settings(accountID: accountID).streaksEnabled) == true,
+           let user = message.peers[message.id.peerId] as? TelegramUser, user.botInfo == nil,
+           !message.media.contains(where: { $0 is TelegramMediaAction }) {
+            let peerID = message.id.peerId.id._internalGetInt64Value()
+            let timestamp = message.timestamp
+            let incoming = message.flags.contains(.Incoming)
+            self.streakUpdates.async {
+                try? MoonStore.shared.recordStreakActivity(accountID: accountID, peerID: peerID, timestamp: timestamp, incoming: incoming)
+            }
+        }
         guard self.isAllowed(context: context, message: message, media: false), !message.text.isEmpty else { return }
         self.observers.observe(context: context)
         MoonVault.shared.capture(self.entry(message), accountID: accountID)

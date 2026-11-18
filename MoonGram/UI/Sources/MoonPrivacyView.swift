@@ -18,10 +18,10 @@ struct MoonPrivacyView: View {
     var body: some View {
         List {
             Section {
-                Toggle("Не отправлять прочтение", isOn: self.binding(\.hideReadReceipts))
-                Toggle("Скрывать набор и запись", isOn: self.binding(\.hideTyping))
-                Toggle("Не показывать онлайн", isOn: self.binding(\.hideOnline))
-                Toggle("Скрывать просмотры историй", isOn: self.binding(\.hideStoryViews))
+                Toggle("Не отправлять прочтение", isOn: self.binding(\.hideReadReceipts)).tint(MoonAccent.control)
+                Toggle("Скрывать набор и запись", isOn: self.binding(\.hideTyping)).tint(MoonAccent.control)
+                Toggle("Не показывать онлайн", isOn: self.binding(\.hideOnline)).tint(MoonAccent.control)
+                Toggle("Скрывать просмотры историй", isOn: self.binding(\.hideStoryViews)).tint(MoonAccent.control)
             } header: {
                 Text("Гостевой режим")
             } footer: {

@@ -143,8 +143,8 @@ public func moonRefreshFriendProfile(accountID: Int64, peerID: Int64) {
         do {
             let fetched = try await client.fetch(peerID: peerID)
             try await Task.detached(priority: .utility) {
-                if let archive = fetched?.0 { try MoonStore.shared.importFriend(archive, accountID: accountID, peerID: peerID) }
-                else { try MoonStore.shared.removeFriend(accountID: accountID, peerID: peerID) }
+                if let archive = fetched?.0 { try MoonStore.shared.importFriend(archive, accountID: accountID, peerID: peerID, synced: true) }
+                else { try MoonStore.shared.removeFriend(accountID: accountID, peerID: peerID, synced: true) }
             }.value
         } catch {
             // No Telegram operations or cache deletion on an unavailable profile service.
@@ -153,8 +153,48 @@ public func moonRefreshFriendProfile(accountID: Int64, peerID: Int64) {
 }
 
 @available(iOS 16.0, *)
+@MainActor
+final class MoonAutoPublish: ObservableObject {
+    static let shared = MoonAutoPublish()
+    @Published private(set) var status: [Int64: String] = [:]
+    private var pending: Set<Int64> = []
+    private var active: Set<Int64> = []
+
+    func schedule(accountID: Int64) {
+        self.pending.insert(accountID)
+        guard self.active.insert(accountID).inserted else { return }
+        Task { @MainActor in
+            defer { self.active.remove(accountID) }
+            while self.pending.remove(accountID) != nil {
+                await self.publish(accountID: accountID)
+            }
+        }
+    }
+
+    private func publish(accountID: Int64) async {
+        guard let settings = try? MoonStore.shared.settings(accountID: accountID), settings.autoPublishStyle == true else {
+            self.status[accountID] = nil
+            return
+        }
+        guard let address = UserDefaults.standard.string(forKey: "MoonGram.syncURL.\(accountID)"),
+              let client = try? MoonSyncClient(address: address, token: MoonKeychain.token(accountID: accountID)) else {
+            self.status[accountID] = "Сохрани адрес и приглашение для обмена."
+            return
+        }
+        self.status[accountID] = "Обновляю оформление для друзей…"
+        do {
+            try await client.publish(accountID: accountID, profile: settings.activeProfile.shared(includingBalances: false))
+            self.status[accountID] = "Оформление обновлено."
+        } catch {
+            self.status[accountID] = "Сейчас обновить оформление не удалось. Сохранившиеся данные можно опубликовать вручную."
+        }
+    }
+}
+
+@available(iOS 16.0, *)
 struct MoonSyncView: View {
     @ObservedObject var model: MoonViewModel
+    @ObservedObject private var autoPublish = MoonAutoPublish.shared
     @State private var address = ""
     @State private var token = ""
     @State private var friendID = ""
@@ -175,11 +215,20 @@ struct MoonSyncView: View {
                         try MoonKeychain.save(self.token, accountID: self.model.accountID)
                         UserDefaults.standard.set(self.address, forKey: "MoonGram.syncURL.\(self.model.accountID)")
                         self.status = "Подключение сохранено."
+                        if self.model.settings?.autoPublishStyle == true {
+                            self.autoPublish.schedule(accountID: self.model.accountID)
+                        }
                     } catch { self.model.error = error.localizedDescription }
                 }
             } header: { Text("Подключение") } footer: { Text("Приглашение выдаёт владелец вашего сервиса. Токен хранится в Keychain и не входит в экспорт оформления.") }
             Section {
-                Toggle("Публиковать балансы", isOn: self.$includeBalances)
+                Toggle("Автоматически обновлять оформление", isOn: Binding(get: {
+                    self.model.settings?.autoPublishStyle == true
+                }, set: { enabled in
+                    self.model.mutate { $0.autoPublishStyle = enabled }
+                })).tint(MoonAccent.control)
+                if let status = self.autoPublish.status[self.model.accountID] { Text(status).foregroundStyle(.secondary) }
+                Toggle("Публиковать балансы вручную", isOn: self.$includeBalances).tint(MoonAccent.control)
                 Button("Опубликовать текущее оформление") {
                     self.perform {
                         try await self.client().publish(accountID: self.model.accountID, profile: self.model.profile.shared(includingBalances: self.includeBalances))
@@ -187,17 +236,17 @@ struct MoonSyncView: View {
                     }
                 }
                 Button("Снять публикацию", role: .destructive) { self.confirmUnpublish = true }
-            } header: { Text("Моя публикация") } footer: { Text("Выключатель визуалов действует на этом устройстве. Публикация снимается отдельно. Уже импортированная другом копия хранится на его устройстве до обновления или удаления.") }
+            } header: { Text("Моя публикация") } footer: { Text("Автоматическая публикация обновляет оформление при смене пресета или его редактировании. Только ручная публикация может включать балансы. Выключатель визуалов действует на этом устройстве. Публикация снимается отдельно. Уже импортированная другом копия хранится на его устройстве до обновления или удаления.") }
             Section("Получить оформление друга") {
                 TextField("Telegram ID друга", text: self.$friendID).keyboardType(.numberPad)
                 Button("Обновить оформление") {
                     self.perform {
                         guard let id = Int64(self.friendID), id > 0, id != self.model.accountID else { throw MoonError.invalid("ID друга") }
                         guard let (archive, _) = try await self.client().fetch(peerID: id) else {
-                            try self.model.store.removeFriend(accountID: self.model.accountID, peerID: id)
+                            try self.model.store.removeFriend(accountID: self.model.accountID, peerID: id, synced: true)
                             return "Публикации нет. Сохранённая копия удалена."
                         }
-                        try self.model.store.importFriend(archive, accountID: self.model.accountID, peerID: id)
+                        try self.model.store.importFriend(archive, accountID: self.model.accountID, peerID: id, synced: true)
                         return "Оформление друга обновлено."
                     }
                 }
