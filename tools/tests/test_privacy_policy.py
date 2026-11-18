@@ -25,7 +25,15 @@ class PrivacyPolicyTests(unittest.TestCase):
         gate = sync[sync.index('func synchronizePeerReadState('):].split('    // A channel the account is not a member of', 1)[0]
         # The remainder is intentionally a no-op stand-in: only the production suppression branch is under test.
         gate += '    return .complete()\n}\n'
-        probe = (ROOT / 'Checks/MoonPrivacyProbe.swift').read_text().replace('// PRODUCTION_CODE', engine + '\n' + confirm + '\n' + gate)
+        activity_source = ROOT / 'upstream/Telegram-iOS/submodules/TelegramCore/Sources/State'
+        activity = (activity_source / 'ManagedLocalInputActivities.swift').read_text()
+        activity_gate = activity[activity.index('        if moonPrivacy(accountPeerId).hideTyping'):].split('        if let peer = transaction.getPeer(peerId)', 1)[0]
+        case_line = next(line.strip() for line in (activity_source / 'PeerInputActivity.swift').read_text().splitlines()
+                         if line.strip().startswith('case speakingInGroupCall('))
+        activity_probe = (f'enum PeerInputActivity {{ case typingText; {case_line} }}\n'
+                          'func verifyTypingGate(accountPeerId: PeerId, activity: PeerInputActivity?) -> Signal<Void, NoError> {\n'
+                          + activity_gate + '    return .single(())\n}\n')
+        probe = (ROOT / 'Checks/MoonPrivacyProbe.swift').read_text().replace('// PRODUCTION_CODE', engine + '\n' + confirm + '\n' + gate + activity_probe)
         source = '\n'.join(parts) + '\n' + probe
         compiler = shutil.which('swiftc') or str(ROOT / '.tools/swift/usr/bin/swiftc')
         with tempfile.TemporaryDirectory(prefix='moongram-privacy-') as directory:

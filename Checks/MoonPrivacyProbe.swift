@@ -116,4 +116,15 @@ let secretDisposable = synchronizePeerReadState(network: Network(), postbox: sec
     stateManager: AccountStateManager(accountPeerId: owner), peerId: PeerId(9, namespace: Namespaces.Peer.SecretChat), push: true, validate: true).start()
 precondition(secret.pending && secret.confirmations == 0, "Cloud suppression must not change secret-chat timers")
 secretDisposable.dispose()
+func passesTypingGate(_ activity: PeerInputActivity?, for owner: PeerId) -> Bool {
+    var passed = false
+    let disposable = verifyTypingGate(accountPeerId: owner, activity: activity).start(next: { passed = true })
+    disposable.dispose()
+    return passed
+}
+precondition(!passesTypingGate(.typingText, for: owner))
+precondition(passesTypingGate(nil, for: owner), "Existing typing cancellation must still pass")
+precondition(passesTypingGate(.speakingInGroupCall(timestamp: 42), for: owner), "Group-call speaking must still pass")
+MoonStore.shared.set(MoonPrivacySettings(), accountID: 7)
+precondition(passesTypingGate(.typingText, for: owner))
 print("privacy signals and queue retirement passed")

@@ -423,16 +423,21 @@ index bb453264..2bed6de1 100644
                  return .single(.boolFalse)
              }
 diff --git a/submodules/TelegramCore/Sources/State/ManagedLocalInputActivities.swift b/submodules/TelegramCore/Sources/State/ManagedLocalInputActivities.swift
-index e8e08874..7920da42 100644
+index e8e08874..76beb5b3 100644
 --- a/submodules/TelegramCore/Sources/State/ManagedLocalInputActivities.swift
 +++ b/submodules/TelegramCore/Sources/State/ManagedLocalInputActivities.swift
-@@ -143,6 +143,10 @@ private func actionFromActivity(_ activity: PeerInputActivity?) -> Api.SendMessa
+@@ -143,6 +143,15 @@ private func actionFromActivity(_ activity: PeerInputActivity?) -> Api.SendMessa
  
  private func requestActivity(postbox: Postbox, network: Network, accountPeerId: PeerId, peerId: PeerId, threadId: Int64?, activity: PeerInputActivity?) -> Signal<Void, NoError> {
      return postbox.transaction { transaction -> Signal<Void, NoError> in
 +        if moonPrivacy(accountPeerId).hideTyping, let activity {
 +            // Cancellation must still clear an earlier indicator. Group-call speaking is independent.
-+            if activity != .speakingInGroupCall { return .complete() }
++            switch activity {
++            case .speakingInGroupCall:
++                break
++            default:
++                return .complete()
++            }
 +        }
          if let peer = transaction.getPeer(peerId) {
              if peerId == accountPeerId {
