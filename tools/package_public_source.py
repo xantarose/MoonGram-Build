@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import zipfile
 
-from package_source import ROOT, source_files
+from package_source import ROOT, source_bytes, source_files
 
 
 def public_files():
@@ -23,7 +23,7 @@ def main():
     output = ROOT / 'dist'
     output.mkdir(exist_ok=True)
     with zipfile.ZipFile(output / 'MoonGram-public-source.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
-        for file in files: archive.writestr('MoonGram/' + file['path'], file['content'])
+        for file in files: archive.writestr('MoonGram/' + file['path'], source_bytes(file))
     (output / 'public-source-manifest.json').write_text(json.dumps([{k:v for k,v in file.items() if k != 'content'} for file in files], indent=2))
     print(f'Prepared {len(files)} public source files. No Git history, private workflow, credentials, sessions, phone certificates or configured IPA included.')
 

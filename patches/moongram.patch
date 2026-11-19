@@ -1,5 +1,5 @@
 diff --git a/Telegram/BUILD b/Telegram/BUILD
-index 1ac8279b..79635d59 100644
+index 1ac8279b..7a087dc6 100644
 --- a/Telegram/BUILD
 +++ b/Telegram/BUILD
 @@ -71,6 +71,30 @@ config_setting(
@@ -33,16 +33,32 @@ index 1ac8279b..79635d59 100644
  bool_flag(
      name = "disableExtensions",
      build_setting_default = False,
-@@ -341,7 +365,7 @@ alternate_icon_folders = [
+@@ -327,6 +351,10 @@ filegroup(
+ )
+ 
+ alternate_icon_folders = [
++    "MoonGramCyan",
++    "MoonGramAmber",
++    "MoonGramMono",
++    "MoonGramViolet",
+     "BlackIcon",
+     "BlackClassicIcon",
+     "BlackFilledIcon",
+@@ -341,7 +369,12 @@ alternate_icon_folders = [
      "PremiumTurbo",
  ]
  
 -composer_icon_folders = ["Telegram"]
 +composer_icon_folders = ["MoonGram"]
++
++filegroup(
++    name = "MoonGramIconPreview",
++    srcs = glob(["Telegram-iOS/MoonGramIconPreview/*.png"]),
++)
  
  [
      filegroup(
-@@ -585,12 +609,30 @@ official_background_gpu_fragment = """
+@@ -585,12 +618,30 @@ official_background_gpu_fragment = """
  """
  background_gpu_fragment = official_background_gpu_fragment if telegram_bundle_id == "ph.telegra.Telegraph" else ""
  
@@ -76,7 +92,7 @@ index 1ac8279b..79635d59 100644
          siri_fragment,
          associated_domains_fragment,
          icloud_fragment,
-@@ -641,7 +683,7 @@ plist_fragment(
+@@ -641,7 +692,7 @@ plist_fragment(
      template =
      """
      <key>CFBundleDisplayName</key>
@@ -85,7 +101,7 @@ index 1ac8279b..79635d59 100644
      """
  )
  
-@@ -1696,7 +1738,7 @@ plist_fragment(
+@@ -1696,7 +1747,7 @@ plist_fragment(
      <key>CFBundleDevelopmentRegion</key>
      <string>en</string>
      <key>CFBundleDisplayName</key>
@@ -94,7 +110,7 @@ index 1ac8279b..79635d59 100644
      <key>CFBundleIdentifier</key>
      <string>{telegram_bundle_id}</string>
      <key>CFBundleName</key>
-@@ -1917,6 +1959,7 @@ ios_application(
+@@ -1917,6 +1968,7 @@ ios_application(
      entitlements = ":TelegramEntitlements.entitlements",
      infoplists = [
          ":TelegramInfoPlist",
@@ -102,7 +118,15 @@ index 1ac8279b..79635d59 100644
          ":BuildNumberInfoPlist",
          ":VersionInfoPlist",
          ":RequiredDeviceCapabilitiesPlist",
-@@ -1941,6 +1984,7 @@ ios_application(
+@@ -1928,6 +1980,7 @@ ios_application(
+     ],
+     resources = [
+         ":LaunchScreen",
++        ":MoonGramIconPreview",
+         #":DefaultAppIcon",
+     ],
+     frameworks = [
+@@ -1941,6 +1994,7 @@ ios_application(
          ":AppStringResources",
      ],
      extensions = select({
@@ -110,7 +134,7 @@ index 1ac8279b..79635d59 100644
          ":disableExtensionsSetting": [],
          "//conditions:default": [
              ":ShareExtension",
-@@ -1955,6 +1999,7 @@ ios_application(
+@@ -1955,6 +2009,7 @@ ios_application(
      # --//Telegram:embedWatchApp is set (Make.py sets it for device configs when
      # --embedWatchApp is passed). Off by default, so simulator/dev builds are unaffected.
      watch_application = select({
@@ -339,6 +363,46 @@ index d1ff0f65..93fd26d0 100644
          if let group = self.resolvedPrivateAccessGroup { return group }
          guard let group = self.resolvePrivateAccessGroup?(), !group.isEmpty else {
              throw PasscodeError.unavailable
+diff --git a/submodules/SettingsUI/Sources/Themes/ThemeSettingsAppIconItem.swift b/submodules/SettingsUI/Sources/Themes/ThemeSettingsAppIconItem.swift
+index c7d79fbf..ca4ff0cb 100644
+--- a/submodules/SettingsUI/Sources/Themes/ThemeSettingsAppIconItem.swift
++++ b/submodules/SettingsUI/Sources/Themes/ThemeSettingsAppIconItem.swift
+@@ -387,6 +387,16 @@ class ThemeSettingsAppIconItemNode: ListViewItemNode, ItemListItemNode {
+                             var name = "Icon"
+                             var bordered = true
+                             switch icon.name {
++                                case "MoonGramRaspberry":
++                                    name = "MoonGram"
++                                case "MoonGramCyan":
++                                    name = item.strings.baseLanguageCode == "ru" ? "Бирюза" : "Cyan"
++                                case "MoonGramAmber":
++                                    name = item.strings.baseLanguageCode == "ru" ? "Янтарь" : "Amber"
++                                case "MoonGramMono":
++                                    name = item.strings.baseLanguageCode == "ru" ? "Ч/Б" : "Mono"
++                                case "MoonGramViolet":
++                                    name = item.strings.baseLanguageCode == "ru" ? "Фиолет" : "Violet"
+                                 case "BlueIcon":
+                                     name = item.strings.Appearance_AppIconDefault
+                                 case "BlackIcon":
+diff --git a/submodules/SettingsUI/Sources/Themes/ThemeSettingsController.swift b/submodules/SettingsUI/Sources/Themes/ThemeSettingsController.swift
+index f74a40b1..f340061a 100644
+--- a/submodules/SettingsUI/Sources/Themes/ThemeSettingsController.swift
++++ b/submodules/SettingsUI/Sources/Themes/ThemeSettingsController.swift
+@@ -664,8 +664,12 @@ public func themeSettingsController(context: AccountContext, focusOnItemTag: The
+                 }
+                 pushControllerImpl?(controller)
+             } else {
+-                currentAppIconName.set(icon.name)
+-                context.sharedContext.applicationBindings.requestSetAlternateIconName(icon.isDefault ? nil : icon.name, { _ in
++                context.sharedContext.applicationBindings.requestSetAlternateIconName(icon.isDefault ? nil : icon.name, { applied in
++                    if applied {
++                        Queue.mainQueue().async {
++                            currentAppIconName.set(icon.name)
++                        }
++                    }
+                 })
+             }
+         })
 diff --git a/submodules/TelegramCore/BUILD b/submodules/TelegramCore/BUILD
 index 23e4e285..58dfa530 100644
 --- a/submodules/TelegramCore/BUILD
@@ -1080,7 +1144,7 @@ index b4a03995..a1d602f6 100644
                              rate: nil,
                              actionTitle: component.starsContext.ton ? environment.strings.Ton_WithdrawViaFragment : (withdrawAvailable ? environment.strings.Stars_Intro_BuyShort : environment.strings.Stars_Intro_Buy),
 diff --git a/submodules/TelegramUI/Sources/AppDelegate.swift b/submodules/TelegramUI/Sources/AppDelegate.swift
-index cf304286..d5226e64 100644
+index cf304286..a4a00e6f 100644
 --- a/submodules/TelegramUI/Sources/AppDelegate.swift
 +++ b/submodules/TelegramUI/Sources/AppDelegate.swift
 @@ -310,11 +310,11 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
@@ -1155,3 +1219,17 @@ index cf304286..d5226e64 100644
          
          let deviceSpecificEncryptionParameters = BuildConfig.deviceSpecificEncryptionParameters(rootPath, baseAppBundleId: baseAppBundleId)
          let encryptionParameters = ValueBoxEncryptionParameters(forceEncryptionIfNoSet: false, key: ValueBoxEncryptionParameters.Key(data: deviceSpecificEncryptionParameters.key)!, salt: ValueBoxEncryptionParameters.Salt(data: deviceSpecificEncryptionParameters.salt)!)
+@@ -997,7 +1030,12 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
+         }, getAvailableAlternateIcons: {
+             if #available(iOS 10.3, *) {
+                 var icons = [
+-                    PresentationAppIcon(name: "BlueIcon", imageName: "BlueIcon", isDefault: buildConfig.isAppStoreBuild),
++                    PresentationAppIcon(name: "MoonGramRaspberry", imageName: "MoonGramRaspberry", isDefault: true),
++                    PresentationAppIcon(name: "MoonGramCyan", imageName: "MoonGramCyan"),
++                    PresentationAppIcon(name: "MoonGramAmber", imageName: "MoonGramAmber"),
++                    PresentationAppIcon(name: "MoonGramMono", imageName: "MoonGramMono"),
++                    PresentationAppIcon(name: "MoonGramViolet", imageName: "MoonGramViolet"),
++                    PresentationAppIcon(name: "BlueIcon", imageName: "BlueIcon"),
+                     PresentationAppIcon(name: "New2", imageName: "New2"),
+                     PresentationAppIcon(name: "New1", imageName: "New1"),
+                     PresentationAppIcon(name: "BlackIcon", imageName: "BlackIcon"),

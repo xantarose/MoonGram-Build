@@ -50,8 +50,15 @@ def prepare(source: Path, dependencies: bool = False) -> None:
         (ROOT / "MoonGram/Vault", source / "submodules/MoonGramVault"),
         (ROOT / "MoonGram/Bridge", source / "submodules/MoonGramBridge"),
         (ROOT / "MoonGram/NativeGifts", source / "submodules/MoonGramNativeGifts"),
-        (ROOT / "MoonGram/Brand/MoonGram.icon", source / "Telegram/Telegram-iOS/MoonGram.icon"),
     ]
+    targets.extend(
+        (ROOT / "MoonGram/Brand" / icon, source / "Telegram/Telegram-iOS" / icon)
+        for icon in (
+            "MoonGram.icon", "MoonGramIconPreview",
+            "MoonGramCyan.alticon", "MoonGramAmber.alticon",
+            "MoonGramMono.alticon", "MoonGramViolet.alticon",
+        )
+    )
     for _, destination in targets:
         if destination.exists() and not (destination / ".moongram-managed").is_file():
             raise RuntimeError(f"Refusing to overwrite an unmanaged directory: {destination.name}")
