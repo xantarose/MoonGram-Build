@@ -2,18 +2,23 @@ import Foundation
 import MoonGramCore
 import SwiftUI
 import UniformTypeIdentifiers
+import UIKit
 
 @available(iOS 16.0, *)
 struct MoonProfileEditor: View {
     @ObservedObject var model: MoonViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var profile: MoonProfile
+    @State private var usernames: [MoonIdentityField]
+    @State private var numbers: [MoonIdentityField]
     @State private var stars: String
     @State private var balance: String
 
     init(model: MoonViewModel) {
         self.model = model
         self._profile = State(initialValue: model.profile)
+        self._usernames = State(initialValue: model.profile.usernames.map { MoonIdentityField(text: $0) })
+        self._numbers = State(initialValue: model.profile.collectibleNumbers.map { MoonIdentityField(text: $0) })
         self._stars = State(initialValue: model.profile.stars.map(String.init) ?? "")
         self._balance = State(initialValue: model.profile.walletBalance?.text ?? "")
     }
@@ -21,39 +26,120 @@ struct MoonProfileEditor: View {
     var body: some View {
         Form {
             Section("Профиль") {
-                TextField("Имя — пусто для настоящего", text: self.$profile.displayName)
-                TextField("Декоративный username", text: self.$profile.username).textInputAutocapitalization(.never).autocorrectionDisabled()
-                TextField("Коллекционный номер", text: self.$profile.collectibleNumber).keyboardType(.phonePad)
+                moonField("Имя", placeholder: "Имя из Telegram", value: self.$profile.displayName)
                 Toggle("Внешний вид Premium", isOn: self.$profile.localPremium).tint(MoonAccent.control)
             }
+            MoonIdentitySection(kind: .username, values: self.$usernames)
+            MoonIdentitySection(kind: .number, values: self.$numbers)
             Section {
-                TextField("Stars — пусто для настоящего", text: self.$stars).keyboardType(.numberPad)
-                TextField("Баланс кошелька", text: self.$balance).keyboardType(.decimalPad)
-                TextField("Валюта", text: self.$profile.walletCurrency).textInputAutocapitalization(.characters)
+                moonField("Звёзды", placeholder: "Баланс Telegram", value: self.$stars).keyboardType(.numberPad)
+                moonField("Кошелёк", placeholder: "Визуальный баланс", value: self.$balance).keyboardType(.decimalPad)
+                moonField("Валюта", placeholder: "TON", value: self.$profile.walletCurrency).textInputAutocapitalization(.characters)
             } header: { Text("Визуальные балансы") } footer: {
-                Text("Суммы отображаются локально. Реальная оплата использует данные Telegram. Кошелёк оформления доступен в предпросмотре MoonGram.")
+                Text("Изменения относятся к оформлению. Операции используют фактический баланс Telegram.")
             }
         }
         .navigationTitle("Профиль и балансы")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Сохранить") {
-                    do {
-                        var profile = self.profile
-                        if self.stars.isEmpty { profile.stars = nil }
-                        else {
-                            guard self.stars.allSatisfy({ $0 >= "0" && $0 <= "9" }), let value = Int64(self.stars) else { throw MoonError.invalid("Stars") }
-                            profile.stars = value
+        .scrollDismissesKeyboard(.interactively)
+        .moonBottomAction("Сохранить", busy: self.model.busy, action: self.save)
+    }
+
+    private func save() {
+        do {
+            var profile = self.profile
+            profile.setVisualIdentity(usernames: self.usernames.map(\.text), numbers: self.numbers.map(\.text))
+            let stars = self.stars.trimmingCharacters(in: .whitespacesAndNewlines)
+            if stars.isEmpty {
+                profile.stars = nil
+            } else {
+                guard stars.utf8.allSatisfy({ (48...57).contains($0) }), let value = Int64(stars) else {
+                    throw MoonError.invalid("звёзды")
+                }
+                profile.stars = value
+            }
+            profile.walletBalance = self.balance.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : try MoonAmount(self.balance)
+            try profile.validate()
+            self.model.saveProfile(profile) { self.dismiss() }
+        } catch { self.model.error = error.localizedDescription }
+    }
+}
+
+private struct MoonIdentityField: Identifiable {
+    let id = UUID()
+    var text: String = ""
+}
+
+@available(iOS 16.0, *)
+private struct MoonIdentitySection: View {
+    enum Kind {
+        case username, number
+
+        var title: String { self == .username ? "Визуальные юзернеймы" : "Визуальные номера" }
+        var add: String { self == .username ? "Добавить юзернейм" : "Добавить номер" }
+        var placeholder: String { self == .username ? "username" : "+888 0000 0000" }
+        var symbol: String { self == .username ? "at" : "number" }
+        var keyboard: UIKeyboardType { self == .username ? .asciiCapable : .phonePad }
+    }
+
+    let kind: Kind
+    @Binding var values: [MoonIdentityField]
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var focusedID: UUID?
+
+    var body: some View {
+        Section(self.kind.title) {
+            ForEach(self.$values) { $value in
+                HStack(spacing: 10) {
+                    Image(systemName: self.kind.symbol).foregroundStyle(MoonAccent.text).accessibilityHidden(true)
+                    TextField(self.kind.placeholder, text: $value.text)
+                        .font(.system(.body, design: .rounded))
+                        .keyboardType(self.kind.keyboard)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .accessibilityLabel(self.kind.title)
+                        .focused(self.$focusedID, equals: value.id)
+                    Button {
+                        let id = value.id
+                        if self.focusedID == id { self.focusedID = nil }
+                        withAnimation(self.reduceMotion ? nil : .easeOut(duration: 0.22)) {
+                            self.values.removeAll { $0.id == id }
                         }
-                        profile.walletBalance = self.balance.isEmpty ? nil : try MoonAmount(self.balance)
-                        try profile.validate()
-                        self.model.saveProfile(profile) { self.dismiss() }
-                    } catch { self.model.error = error.localizedDescription }
-                }.disabled(self.model.busy)
+                    } label: {
+                        Image(systemName: "minus.circle").frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(MoonAccent.text)
+                    .accessibilityLabel("Удалить поле")
+                }
+                .padding(.leading, 12)
+                .frame(minHeight: 46)
+                .background(.background, in: RoundedRectangle(cornerRadius: 13))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 13)
+                        .strokeBorder(MoonAccent.control.opacity(self.focusedID == value.id ? 1 : 0.62))
+                        .allowsHitTesting(false)
+                }
+                .listRowSeparator(.hidden)
+            }
+            Button {
+                let row = MoonIdentityField()
+                withAnimation(self.reduceMotion ? nil : .easeOut(duration: 0.22)) { self.values.append(row) }
+                self.focusedID = row.id
+            } label: {
+                Label(self.kind.add, systemImage: "plus.circle").frame(minHeight: 44)
             }
         }
     }
+}
+
+@available(iOS 16.0, *)
+private func moonField(_ title: String, placeholder: String, value: Binding<String>) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+        Text(title).font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+        TextField(placeholder, text: value).font(.system(.body, design: .rounded)).accessibilityLabel(title)
+    }
+    .padding(.vertical, 4)
 }
 
 @available(iOS 16.0, *)
@@ -111,6 +197,7 @@ struct MoonPresetsView: View {
 @available(iOS 16.0, *)
 struct MoonGiftsView: View {
     @ObservedObject var model: MoonViewModel
+    @State private var search = ""
 
     var body: some View {
         List {
@@ -123,9 +210,12 @@ struct MoonGiftsView: View {
                     }.frame(maxWidth: .infinity).padding(.vertical, 24)
                 }
             }
+            if !self.model.profile.gifts.isEmpty && self.visibleGifts.isEmpty {
+                Section { Text("Подарки не найдены").foregroundStyle(.secondary) }
+            }
             ForEach(self.collections, id: \.self) { collection in
                 Section(collection.isEmpty ? "Без коллекции" : collection) {
-                    ForEach(self.model.profile.gifts.filter { $0.collection == collection }) { gift in
+                    ForEach(self.visibleGifts.filter { $0.collection == collection }) { gift in
                         NavigationLink { MoonGiftEditor(model: self.model, gift: gift) } label: {
                             HStack(spacing: 12) {
                                 MoonGiftArtwork(gift: gift, nativeGifts: self.model.nativeGifts).frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 12)).accessibilityHidden(true)
@@ -140,16 +230,29 @@ struct MoonGiftsView: View {
             }
         }
         .navigationTitle("Коллекции")
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
+        .searchable(text: self.$search, prompt: "Название или номер")
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            MoonActionDock {
                 NavigationLink { MoonGiftEditor(model: self.model, gift: MoonGift()) } label: {
-                    Image(systemName: "plus").accessibilityLabel("Создать подарок")
-                }.disabled(self.model.profile.gifts.count >= 128)
+                    Label("Создать подарок", systemImage: "plus")
+                        .frame(maxWidth: .infinity, minHeight: 36)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(MoonAccent.control)
+                .disabled(self.model.profile.gifts.count >= 128)
             }
         }
     }
 
-    private var collections: [String] { Array(Set(self.model.profile.gifts.map(\.collection))).sorted() }
+    private var visibleGifts: [MoonGift] {
+        let query = self.search.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return self.model.profile.gifts }
+        return self.model.profile.gifts.filter { gift in
+            [gift.title, gift.number, gift.collection].contains { $0.localizedCaseInsensitiveContains(query) }
+        }
+    }
+
+    private var collections: [String] { Array(Set(self.visibleGifts.map(\.collection))).sorted() }
 }
 
 @available(iOS 16.0, *)
@@ -157,6 +260,8 @@ struct MoonGiftEditor: View {
     @ObservedObject var model: MoonViewModel
     @Environment(\.dismiss) private var dismiss
     @State var gift: MoonGift
+    var focusTitleForQA = false
+    @FocusState private var titleFocused: Bool
     @State private var importingArtwork = false
     @State private var confirmDelete = false
     @State private var choosingTelegramGift = false
@@ -168,7 +273,7 @@ struct MoonGiftEditor: View {
                     .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
             }
             Section("Коллекционный предмет") {
-                TextField("Название", text: self.$gift.title)
+                TextField("Название", text: self.$gift.title).focused(self.$titleFocused)
                 TextField("Номер", text: self.$gift.number)
                 TextField("Коллекция", text: self.$gift.collection)
                 if self.model.nativeGifts != nil {
@@ -200,6 +305,9 @@ struct MoonGiftEditor: View {
             }
         }
         .navigationTitle(self.gift.title)
+        .task {
+            if self.focusTitleForQA { self.titleFocused = true }
+        }
         .sheet(isPresented: self.$choosingTelegramGift) {
             if let provider = self.model.nativeGifts {
                 MoonNativeEditor(provider: provider, gift: self.gift) { gift in
@@ -209,15 +317,15 @@ struct MoonGiftEditor: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Сохранить") {
-                    var profile = self.model.profile
-                    if let index = profile.gifts.firstIndex(where: { $0.id == self.gift.id }) { profile.gifts[index] = self.gift }
-                    else { profile.gifts.append(self.gift) }
-                    self.model.saveProfile(profile) { self.dismiss() }
-                }.disabled(self.model.busy)
+        .scrollDismissesKeyboard(.interactively)
+        .moonBottomAction("Сохранить", busy: self.model.busy) {
+            var profile = self.model.profile
+            if let index = profile.gifts.firstIndex(where: { $0.id == self.gift.id }) {
+                profile.gifts[index] = self.gift
+            } else {
+                profile.gifts.append(self.gift)
             }
+            self.model.saveProfile(profile) { self.dismiss() }
         }
         .fileImporter(isPresented: self.$importingArtwork, allowedContentTypes: [.png, .jpeg], allowsMultipleSelection: false) { result in
             do {

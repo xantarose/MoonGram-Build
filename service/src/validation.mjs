@@ -1,13 +1,21 @@
+import { Buffer } from 'node:buffer';
+
 export const maximumBytes = 6_291_456;
 
 export function validateArchive(archive) {
   object(archive, ['format', 'version', 'profile']);
   if (archive.format !== 'moongram.profile' || archive.version !== 1) invalid();
   const p = archive.profile;
-  object(p, ['displayName', 'username', 'collectibleNumber', 'localPremium', 'stars', 'walletBalance', 'walletCurrency', 'gifts'],
-    ['stars', 'walletBalance']);
+  object(p, ['displayName', 'username', 'collectibleNumber', 'localPremium', 'stars', 'walletBalance',
+    'walletCurrency', 'gifts', 'additionalUsernames', 'additionalNumbers'],
+    ['stars', 'walletBalance', 'additionalUsernames', 'additionalNumbers']);
   for (const key of ['displayName', 'username']) text(p[key], 64);
   text(p.collectibleNumber, 48);
+  for (const [key, length] of [['additionalUsernames', 64], ['additionalNumbers', 48]]) {
+    if (p[key] === undefined) continue;
+    if (!Array.isArray(p[key])) invalid();
+    for (const value of p[key]) text(value, length, true);
+  }
   text(p.walletCurrency, 12, true);
   if (typeof p.localPremium !== 'boolean') invalid();
   // The wire format uses decimal strings to preserve the entire Swift Int64 range.

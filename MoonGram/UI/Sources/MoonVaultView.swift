@@ -9,7 +9,7 @@ import UIKit
 @available(iOS 16.0, *)
 struct MoonVaultView: View {
     @ObservedObject var model: MoonViewModel
-    @State private var peerID = ""
+    var chatID: Int64? = nil
     @State private var saveMessages = false
     @State private var saveMedia = false
     @State private var entries: [MoonVaultEntry] = []
@@ -20,19 +20,26 @@ struct MoonVaultView: View {
 
     var body: some View {
         List {
-            Section {
-                TextField("Telegram ID друга", text: self.$peerID).keyboardType(.numberPad)
-                Toggle("Копии загруженных входящих сообщений", isOn: self.$saveMessages).tint(MoonAccent.control)
-                Toggle("Копии открытых одноразовых фото и видео", isOn: self.$saveMedia).tint(MoonAccent.control)
-                Button("Сохранить настройки") {
-                    self.model.mutate {
-                        let experiments = MoonExperiments(testPeerID: Int64(self.peerID), saveLoadedMessages: self.saveMessages, saveViewOnceMedia: self.saveMedia)
-                        try experiments.validate()
-                        $0.experiments = experiments
+            if let chatID = self.chatID {
+                Section {
+                    Toggle("Копии входящих сообщений", isOn: self.$saveMessages).tint(MoonAccent.control)
+                    Toggle("Копии открытых одноразовых фото и видео", isOn: self.$saveMedia).tint(MoonAccent.control)
+                    Button("Применить к этому чату") {
+                        self.model.mutate {
+                            let experiments = MoonExperiments(testPeerID: chatID, saveLoadedMessages: self.saveMessages, saveViewOnceMedia: self.saveMedia)
+                            try experiments.validate()
+                            $0.experiments = experiments
+                        }
                     }
+                    .disabled(self.model.busy)
+                } footer: {
+                    Text("Включайте с согласия собеседника. Настройка относится к этому чату. Предыдущий выбранный чат перестанет сохранять новые копии.")
                 }
-            } header: { Text("Эксперимент с согласившимся другом") } footer: {
-                Text("Только указанный личный облачный чат и входящие данные. Настройки выключены по умолчанию. Обычные события просмотра и таймеры Telegram продолжают работать. Это нарушает ожидаемое исчезновение копии и ограничивается вашим согласованным экспериментом.")
+            } else {
+                Section {
+                    Text("Открой профиль собеседника и выбери «Локальные копии», чтобы настроить этот чат.")
+                        .foregroundStyle(.secondary)
+                }
             }
             Section {
                 Button("Обновить список", action: self.reload)
@@ -41,10 +48,10 @@ struct MoonVaultView: View {
                 Text("Локально, с шифрованием. До 500 снимков, 1 ГиБ на аккаунт и 64 МиБ на медиа. Когда лимит достигнут, новые копии отклоняются.").font(.footnote).foregroundStyle(.secondary)
             }
             Section {
-                if self.entries.isEmpty && !self.loading {
+                if self.visibleEntries.isEmpty && !self.loading {
                     Text("Снимков пока нет. Включите эксперимент для друга, затем откройте тестовый чат или медиа.").foregroundStyle(.secondary)
                 }
-                ForEach(self.entries) { entry in
+                ForEach(self.visibleEntries) { entry in
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             Label(entry.deleted ? "Удалено в Telegram" : "Локальный снимок", systemImage: entry.deleted ? "trash" : "lock.doc")
@@ -74,9 +81,13 @@ struct MoonVaultView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             let experiments = self.model.settings?.experiments ?? MoonExperiments()
-            self.peerID = experiments.testPeerID.map(String.init) ?? ""
-            self.saveMessages = experiments.saveLoadedMessages
-            self.saveMedia = experiments.saveViewOnceMedia
+            if self.chatID != nil, experiments.testPeerID == self.chatID {
+                self.saveMessages = experiments.saveLoadedMessages
+                self.saveMedia = experiments.saveViewOnceMedia
+            } else {
+                self.saveMessages = false
+                self.saveMedia = self.chatID != nil
+            }
             self.reload()
         }
         .sheet(item: self.$preview) { preview in MoonVaultMediaView(preview: preview) }
@@ -90,6 +101,11 @@ struct MoonVaultView: View {
                 }
             }
         }
+    }
+
+    private var visibleEntries: [MoonVaultEntry] {
+        guard let chatID = self.chatID else { return self.entries }
+        return self.entries.filter { $0.peerID == chatID }
     }
 
     private func reload() {

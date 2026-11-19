@@ -12,7 +12,7 @@ class NativeEntrypointTests(unittest.TestCase):
     def test_actual_gift_entrypoints_hop_to_the_main_actor(self):
         base = ROOT / 'upstream/Telegram-iOS/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources'
         profile = (base / 'PeerInfoProfileItems.swift').read_text()
-        profile = profile.split('text: "Коллекции MoonGram"', 1)[1].split('action: {', 1)[1].split('\n            }))', 1)[0]
+        profile = profile.split('id: "moonCollection"', 1)[1].split('action: {', 1)[1].split('\n                    }))', 1)[0]
         settings = (base / 'PeerInfoScreenSettingsActions.swift').read_text()
         settings = settings.split('case .moonGram:', 1)[1].split('case .avatar:', 1)[0]
         # Compile the actual patched callbacks against the native provider's isolation contract.
@@ -26,15 +26,21 @@ struct Context { let account = Account() }
 struct User { let id = PeerID() }
 @MainActor final class MoonTelegramGiftProvider { init(context: Context) {} }
 struct MoonTransportControls {}
-@MainActor func moonTransportControls(context: Context) -> MoonTransportControls { MoonTransportControls() }
+@MainActor func moonTransportControls(context: Context, openProxySettings: @escaping @MainActor () -> Void) -> MoonTransportControls { MoonTransportControls() }
+struct ProxyScreen {}
+func proxySettingsController(context: Context) -> ProxyScreen { ProxyScreen() }
 struct MoonGramScreen {
-    init(accountID: Int64, peerID: Int64? = nil, nativeGifts: MoonTelegramGiftProvider, transport: MoonTransportControls? = nil) {}
+    init(accountID: Int64, peerID: Int64? = nil, nativeGifts: MoonTelegramGiftProvider, transport: MoonTransportControls? = nil, pushed: Bool = false) {}
 }
 enum Root { case root }
 enum Surface { case window(Root) }
-class Controller { func present(_ screen: MoonGramScreen, in: Surface) {} }
+class Controller {
+    func present(_ screen: MoonGramScreen, in: Surface) {}
+    func push(_ screen: MoonGramScreen) {}
+    func push(_ screen: ProxyScreen) {}
+}
 struct Interaction { func getController() -> Controller? { nil } }
-func profileEntry(context: Context, user: User, interaction: Interaction) {
+func profileEntry(context: Context, accountID: Int64, peerID: Int64, interaction: Interaction) {
 '''
         source = stubs + profile + '''
 }

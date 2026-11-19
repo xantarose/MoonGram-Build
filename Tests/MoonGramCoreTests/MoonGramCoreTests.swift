@@ -3,6 +3,28 @@ import XCTest
 @testable import MoonGramCore
 
 final class MoonGramCoreTests: XCTestCase {
+    func testVisualIdentityKeepsEveryCardAndLegacyFields() throws {
+        var profile = MoonProfile()
+        profile.username = "old_user"
+        profile.collectibleNumber = "+888 1000"
+        let old = try MoonArchive.decode(try MoonArchive(profile: profile).encoded()).profile
+        XCTAssertEqual(old.usernames, ["old_user"])
+        XCTAssertEqual(old.collectibleNumbers, ["+888 1000"])
+
+        let names = (0..<150).map { "alias_\($0)" }
+        let numbers = (0..<150).map { "+888 21\($0)" }
+        profile.setVisualIdentity(usernames: [" @alias_0 ", ""] + Array(names.dropFirst()), numbers: numbers)
+        let restored = try MoonArchive.decode(try MoonArchive(profile: profile).encoded()).profile
+        XCTAssertEqual(restored.usernames, names)
+        XCTAssertEqual(restored.collectibleNumbers, numbers)
+        XCTAssertEqual(restored.username, names[0])
+        XCTAssertEqual(restored.collectibleNumber, numbers[0])
+
+        profile.setVisualIdentity(usernames: [], numbers: [])
+        XCTAssertTrue(profile.usernames.isEmpty)
+        XCTAssertTrue(profile.collectibleNumbers.isEmpty)
+    }
+
     func testMonthlyStreakRestoresPersistAndDoNotCrossAccounts() throws {
         let (store, directory) = try self.temporaryStore()
         defer { try? FileManager.default.removeItem(at: directory) }

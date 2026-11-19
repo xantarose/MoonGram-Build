@@ -6,7 +6,7 @@ import UIKit
 import UniformTypeIdentifiers
 
 @available(iOS 16.0, *)
-struct MoonProfilePreview: View {
+struct MoonSharedStyleView: View {
     let profile: MoonProfile?
     var nativeGifts: MoonNativeGiftProvider? = nil
 
@@ -16,11 +16,15 @@ struct MoonProfilePreview: View {
                 VStack(spacing: 20) {
                     Image(systemName: "moon.circle.fill").font(.system(size: 76)).foregroundStyle(.tint).accessibilityHidden(true)
                     HStack {
-                        Text(profile.displayName.isEmpty ? "Мой профиль" : profile.displayName).font(.largeTitle.bold())
+                        Text(profile.displayName.isEmpty ? "Оформление" : profile.displayName).font(.largeTitle.bold())
                         if profile.localPremium { Image(systemName: "star.fill").foregroundStyle(.tint).accessibilityLabel("Визуальный Premium") }
                     }.multilineTextAlignment(.center)
-                    if !profile.username.isEmpty { Text("@\(profile.username.trimmingCharacters(in: CharacterSet(charactersIn: "@")))").foregroundStyle(.secondary) }
-                    if !profile.collectibleNumber.isEmpty { Text(profile.collectibleNumber).font(.body.monospaced()) }
+                    ForEach(Array(profile.usernames.enumerated()), id: \.offset) { _, username in
+                        Text("@\(username.trimmingCharacters(in: CharacterSet(charactersIn: "@")))").foregroundStyle(.secondary)
+                    }
+                    ForEach(Array(profile.collectibleNumbers.enumerated()), id: \.offset) { _, number in
+                        Text(number).font(.body.monospaced()).textSelection(.enabled)
+                    }
                     if let stars = profile.stars { self.balance(title: "Stars · оформление", value: "\(stars)", symbol: "star.fill") }
                     if let balance = profile.walletBalance { self.balance(title: "Кошелёк · оформление", value: "\(balance.text) \(profile.walletCurrency)", symbol: "wallet.pass") }
                     if !profile.gifts.isEmpty {
@@ -43,7 +47,7 @@ struct MoonProfilePreview: View {
                     Text("Включите визуалы или импортируйте оформление этого друга в настройках MoonGram.").multilineTextAlignment(.center).foregroundStyle(.secondary)
                 }.padding(24)
             }
-        }.background(Color(uiColor: .systemGroupedBackground)).navigationTitle("Предпросмотр").navigationBarTitleDisplayMode(.inline)
+        }.background(Color(uiColor: .systemGroupedBackground)).navigationTitle("Оформление друга").navigationBarTitleDisplayMode(.inline)
     }
 
     private func balance(title: String, value: String, symbol: String) -> some View {

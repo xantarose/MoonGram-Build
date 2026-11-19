@@ -122,7 +122,11 @@ def screenshots(app):
         run("xcrun", "simctl", "install", udid, str(app))
         for appearance in ["light", "dark"]:
             run("xcrun", "simctl", "ui", udid, "appearance", appearance)
-            for screen, arguments in [("settings", []), ("profile", ["--preview"]), ("privacy", ["--privacy"])]:
+            for screen, arguments in [
+                ("settings", []), ("profile-editor", ["--profile-editor"]),
+                ("gift-editor", ["--gift-editor"]), ("gift-keyboard", ["--gift-editor", "--open-keyboard"]),
+                ("compact-editor", ["--compact-editor"]), ("privacy", ["--privacy"]),
+            ]:
                 run("xcrun", "simctl", "terminate", udid, "app.moongram.qa.moongramqa", check=False)
                 with tempfile.TemporaryDirectory(prefix="moongram-qa-recording-") as temporary:
                     recording = None

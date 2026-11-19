@@ -134,6 +134,8 @@ public struct MoonProfile: Codable, Equatable, Sendable {
     public var displayName: String = ""
     public var username: String = ""
     public var collectibleNumber: String = ""
+    public var additionalUsernames: [String] = []
+    public var additionalNumbers: [String] = []
     public var localPremium: Bool = false
     public var stars: Int64? = nil
     public var walletBalance: MoonAmount? = nil
@@ -143,7 +145,8 @@ public struct MoonProfile: Codable, Equatable, Sendable {
     public init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case displayName, username, collectibleNumber, localPremium, stars, walletBalance, walletCurrency, gifts
+        case displayName, username, collectibleNumber, additionalUsernames, additionalNumbers
+        case localPremium, stars, walletBalance, walletCurrency, gifts
     }
 
     public init(from decoder: Decoder) throws {
@@ -151,6 +154,8 @@ public struct MoonProfile: Codable, Equatable, Sendable {
         self.displayName = try values.decode(String.self, forKey: .displayName)
         self.username = try values.decode(String.self, forKey: .username)
         self.collectibleNumber = try values.decode(String.self, forKey: .collectibleNumber)
+        self.additionalUsernames = try values.decodeIfPresent([String].self, forKey: .additionalUsernames) ?? []
+        self.additionalNumbers = try values.decodeIfPresent([String].self, forKey: .additionalNumbers) ?? []
         self.localPremium = try values.decode(Bool.self, forKey: .localPremium)
         if let text = try values.decodeIfPresent(String.self, forKey: .stars) {
             guard !text.isEmpty, text.unicodeScalars.allSatisfy({ (0x30...0x39).contains($0.value) }), let value = Int64(text) else {
@@ -168,6 +173,8 @@ public struct MoonProfile: Codable, Equatable, Sendable {
         try values.encode(self.displayName, forKey: .displayName)
         try values.encode(self.username, forKey: .username)
         try values.encode(self.collectibleNumber, forKey: .collectibleNumber)
+        if !self.additionalUsernames.isEmpty { try values.encode(self.additionalUsernames, forKey: .additionalUsernames) }
+        if !self.additionalNumbers.isEmpty { try values.encode(self.additionalNumbers, forKey: .additionalNumbers) }
         try values.encode(self.localPremium, forKey: .localPremium)
         try values.encodeIfPresent(self.stars.map(String.init), forKey: .stars)
         try values.encodeIfPresent(self.walletBalance, forKey: .walletBalance)
@@ -179,6 +186,12 @@ public struct MoonProfile: Codable, Equatable, Sendable {
         try moonValidateText(self.displayName, field: "имя", maximum: 64)
         try moonValidateText(self.username, field: "декоративный username", maximum: 64)
         try moonValidateText(self.collectibleNumber, field: "декоративный номер", maximum: 48)
+        for username in self.additionalUsernames {
+            try moonValidateText(username, field: "декоративный username", maximum: 64, required: true)
+        }
+        for number in self.additionalNumbers {
+            try moonValidateText(number, field: "декоративный номер", maximum: 48, required: true)
+        }
         try moonValidateText(self.walletCurrency, field: "валюта", maximum: 12, required: true)
         if let stars = self.stars, stars < 0 { throw MoonError.invalid("звёзды") }
         guard self.gifts.count <= 128, Set(self.gifts.map(\.id)).count == self.gifts.count else {
@@ -186,6 +199,25 @@ public struct MoonProfile: Codable, Equatable, Sendable {
         }
         for gift in self.gifts { try gift.validate() }
         guard self.artworkBytes <= 4_194_304 else { throw MoonError.tooLarge }
+    }
+
+    public var usernames: [String] {
+        self.username.isEmpty ? self.additionalUsernames : [self.username] + self.additionalUsernames
+    }
+
+    public var collectibleNumbers: [String] {
+        self.collectibleNumber.isEmpty ? self.additionalNumbers : [self.collectibleNumber] + self.additionalNumbers
+    }
+
+    public mutating func setVisualIdentity(usernames: [String], numbers: [String]) {
+        let usernames = usernames.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "@"))
+        }.filter { !$0.isEmpty }
+        let numbers = numbers.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        self.username = usernames.first ?? ""
+        self.additionalUsernames = Array(usernames.dropFirst())
+        self.collectibleNumber = numbers.first ?? ""
+        self.additionalNumbers = Array(numbers.dropFirst())
     }
 
     public var artworkBytes: Int { self.gifts.reduce(0) { $0 + ($1.artwork?.count ?? 0) } }

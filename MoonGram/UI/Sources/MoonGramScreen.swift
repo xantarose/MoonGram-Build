@@ -15,18 +15,19 @@ public final class MoonGramScreen: ViewController {
     private let accountID: Int64
     private let peerID: Int64?
     private let nativeGifts: MoonNativeGiftProvider?
-    private let streak: Bool
+    private let archivePeerID: Int64?
     private let transport: MoonTransportControls?
     private var host: UIHostingController<AnyView>?
 
-    public init(accountID: Int64, peerID: Int64? = nil, nativeGifts: MoonNativeGiftProvider? = nil, transport: MoonTransportControls? = nil, streak: Bool = false) {
+    public init(accountID: Int64, peerID: Int64? = nil, nativeGifts: MoonNativeGiftProvider? = nil,
+                transport: MoonTransportControls? = nil, archivePeerID: Int64? = nil, pushed: Bool = false) {
         self.accountID = accountID
         self.peerID = peerID
         self.nativeGifts = nativeGifts
-        self.streak = streak
+        self.archivePeerID = archivePeerID
         self.transport = transport
         super.init(navigationBarPresentationData: nil)
-        self.navigationPresentation = .modal
+        self.navigationPresentation = pushed ? .default : .modal
     }
 
     required public init(coder: NSCoder) { fatalError("Use init(accountID:peerID:)") }
@@ -35,7 +36,7 @@ public final class MoonGramScreen: ViewController {
         self.displayNode = ASDisplayNode()
         self.displayNode.backgroundColor = .systemGroupedBackground
         super.displayNodeDidLoad()
-        let root = MoonRootView(accountID: self.accountID, peerID: self.peerID, nativeGifts: self.nativeGifts, transport: self.transport, streak: self.streak, close: { [weak self] in
+        let root = MoonRootView(accountID: self.accountID, peerID: self.peerID, nativeGifts: self.nativeGifts, transport: self.transport, archivePeerID: self.archivePeerID, close: { [weak self] in
             self?.dismiss()
         })
         let host = UIHostingController(rootView: AnyView(root))
@@ -47,7 +48,15 @@ public final class MoonGramScreen: ViewController {
 
     public override func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
         super.containerLayoutUpdated(layout, transition: transition)
-        self.host?.view.frame = CGRect(origin: .zero, size: layout.size)
+        guard let view = self.host?.view else { return }
+        let insets = layout.insets(options: [.statusBar, .input])
+        let top = max(layout.safeInsets.top, insets.top)
+        let bottom = max(layout.safeInsets.bottom, insets.bottom)
+        let left = max(layout.safeInsets.left, insets.left)
+        let right = max(layout.safeInsets.right, insets.right)
+        transition.updateFrame(view: view, frame: CGRect(x: left, y: top,
+            width: max(0, layout.size.width - left - right),
+            height: max(0, layout.size.height - top - bottom)))
     }
 }
 #endif
@@ -63,10 +72,9 @@ public func makeMoonGramQAView() -> AnyView {
     profile.stars = 999_999_999
     profile.walletBalance = try? MoonAmount("123456.789")
     profile.collectibleNumber = "+888 1234 5678"
+    profile.additionalUsernames = ["long_username_for_compact_iphone"]
+    profile.additionalNumbers = ["+888 1234 5679"]
     profile.gifts = [MoonGift(title: "Лунный подарок", number: "888", model: .moon), MoonGift(title: "Северная звезда", number: "7", model: .star, backdrop: "284A38", symbolColor: "D5E8CE")]
-    if ProcessInfo.processInfo.arguments.contains("--preview") {
-        return AnyView(NavigationStack { MoonProfilePreview(profile: profile) })
-    }
     var settings = MoonSettings()
     settings.enabled = true
     settings.displayMode = .both
@@ -74,6 +82,21 @@ public func makeMoonGramQAView() -> AnyView {
     try? MoonStore.shared.save(settings, accountID: 1)
     if ProcessInfo.processInfo.arguments.contains("--privacy") {
         return AnyView(NavigationStack { MoonPrivacyView(model: MoonViewModel(accountID: 1)) })
+    }
+    let arguments = ProcessInfo.processInfo.arguments
+    if arguments.contains("--profile-editor") {
+        return AnyView(NavigationStack { MoonProfileEditor(model: MoonViewModel(accountID: 1)) })
+    }
+    if arguments.contains("--gift-editor") {
+        return AnyView(NavigationStack {
+            MoonGiftEditor(model: MoonViewModel(accountID: 1), gift: MoonGift(),
+                           focusTitleForQA: arguments.contains("--open-keyboard"))
+        })
+    }
+    if arguments.contains("--compact-editor") {
+        return AnyView(NavigationStack { MoonProfileEditor(model: MoonViewModel(accountID: 1)) }
+            .frame(maxWidth: 320)
+            .environment(\.dynamicTypeSize, .accessibility1))
     }
     return AnyView(MoonRootView(accountID: 1, peerID: nil, close: {}))
 }
@@ -164,7 +187,7 @@ struct MoonRootView: View {
     @StateObject private var model: MoonViewModel
     private let peerID: Int64?
     private let close: () -> Void
-    private let streak: Bool
+    private let archivePeerID: Int64?
     private let transport: MoonTransportControls?
     @State private var showImporter = false
     @State private var showExporter = false
@@ -173,26 +196,26 @@ struct MoonRootView: View {
     @State private var importForFriend = false
     @State private var document = MoonDocument(data: Data())
 
-    init(accountID: Int64, peerID: Int64?, nativeGifts: MoonNativeGiftProvider? = nil, transport: MoonTransportControls? = nil, streak: Bool = false, close: @escaping () -> Void) {
+    init(accountID: Int64, peerID: Int64?, nativeGifts: MoonNativeGiftProvider? = nil, transport: MoonTransportControls? = nil, archivePeerID: Int64? = nil, close: @escaping () -> Void) {
         self._model = StateObject(wrappedValue: MoonViewModel(accountID: accountID, nativeGifts: nativeGifts))
         self.peerID = peerID
         self.close = close
-        self.streak = streak
+        self.archivePeerID = archivePeerID
         self.transport = transport
     }
 
     var body: some View {
         NavigationStack {
             Group {
-                if let peerID = self.peerID, self.streak {
-                    MoonStreakView(accountID: self.model.accountID, peerID: peerID)
+                if let archivePeerID = self.archivePeerID {
+                    MoonVaultView(model: self.model, chatID: archivePeerID)
                 } else if let peerID = self.peerID {
-                    MoonProfilePreview(profile: self.model.store.visibleProfile(accountID: self.model.accountID, peerID: peerID), nativeGifts: self.model.nativeGifts)
+                    MoonSharedStyleView(profile: self.model.store.visibleProfile(accountID: self.model.accountID, peerID: peerID), nativeGifts: self.model.nativeGifts)
                 } else {
                     self.settingsList
                 }
             }
-            .navigationTitle(self.streak ? "Стрик" : "MoonGram")
+            .navigationTitle(self.archivePeerID == nil ? "MoonGram" : "Локальные копии")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) { Button("Готово", action: self.close) }
             }
@@ -225,13 +248,8 @@ struct MoonRootView: View {
     private var settingsList: some View {
         List {
             Section {
-                Label {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Твой Telegram. Твоё оформление.").font(.headline)
-                        Text("Визуалы хранятся отдельно от аккаунта.").font(.subheadline).foregroundStyle(.secondary)
-                    }
-                } icon: { Image(systemName: "moon.stars.fill").font(.title).accessibilityHidden(true) }
-                .padding(.vertical, 8)
+                MoonSettingsBanner()
+                    .listRowInsets(EdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10))
                 Toggle("Визуалы", isOn: Binding(get: { self.model.settings?.enabled ?? false }, set: { enabled in
                     self.model.mutate { $0.enabled = enabled }
                 })).tint(MoonAccent.control)
@@ -258,7 +276,6 @@ struct MoonRootView: View {
                     Label("Коллекции · \(self.model.profile.gifts.count)", systemImage: "gift")
                 }
                 NavigationLink { MoonPresetsView(model: self.model) } label: { Label("Пресеты", systemImage: "square.stack") }
-                NavigationLink { MoonProfilePreview(profile: self.model.profile, nativeGifts: self.model.nativeGifts) } label: { Label("Предпросмотр", systemImage: "eye") }
             }
             Section {
                 Toggle("Включить балансы в экспорт", isOn: self.$includeBalances).tint(MoonAccent.control)
@@ -285,19 +302,10 @@ struct MoonRootView: View {
                     NavigationLink { MoonTransportView(controls: transport) } label: { Label("Подключение", systemImage: "network") }
                 }
             }
-            Section {
-                Toggle("Показывать стрики в личных чатах", isOn: Binding(get: {
-                    self.model.settings?.streaksEnabled == true
-                }, set: { enabled in
-                    self.model.mutate { $0.streaksEnabled = enabled }
-                })).tint(MoonAccent.control)
-            } footer: {
-                Text("Когда включено, счётчик появляется в карточке собеседника.")
-            }
             Section("Обмен с друзьями") {
                 NavigationLink { MoonSyncView(model: self.model) } label: { Label("Синхронизация", systemImage: "arrow.triangle.2.circlepath") }
             }
-            Section("Эксперимент с другом") {
+            Section("Хранилище") {
                 NavigationLink { MoonVaultView(model: self.model) } label: { Label("Локальные копии", systemImage: "lock.doc") }
             }
             Section {
@@ -306,6 +314,6 @@ struct MoonRootView: View {
             }
         }
         .disabled(self.model.busy || self.model.settings == nil)
-        .overlay { if self.model.busy { ProgressView().padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16)) } }
+        .scrollDismissesKeyboard(.interactively)
     }
 }
