@@ -52,6 +52,7 @@ def main():
     parser.add_argument("--kind", choices=KINDS, default="simulator")
     parser.add_argument("--build-number", type=int, default=1)
     parser.add_argument("--source", type=Path, default=ROOT / "upstream/Telegram-iOS")
+    parser.add_argument("--cache-dir", type=Path, help="Reuse Bazel build outputs from this directory.")
     parser.add_argument("--template", action="store_true", help="Produce a public template with placeholder API values only.")
     parser.add_argument("--preflight-only", action="store_true", help="Check personal signing settings and analyze the Xcode build without compiling the app.")
     args = parser.parse_args()
@@ -73,8 +74,9 @@ def main():
         source = args.source.resolve()
         prepare(source, dependencies=True)
         command = [sys.executable, "build-system/Make/Make.py"]
-        # A disposable CI runner cannot reuse this disk cache; avoid storing outputs twice.
-        if os.environ.get("GITHUB_ACTIONS") != "true":
+        if args.cache_dir is not None:
+            command += ["--cacheDir=" + str(args.cache_dir.resolve())]
+        elif os.environ.get("GITHUB_ACTIONS") != "true":
             command += ["--cacheDir=" + str(ROOT / ".build/bazel")]
         configuration = "debug_sim_arm64" if args.kind.endswith("simulator") else "release_arm64"
         build_args = ["--continueOnError", "--configuration=" + configuration,

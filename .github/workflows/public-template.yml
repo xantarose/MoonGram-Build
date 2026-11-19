@@ -31,10 +31,39 @@ jobs:
           python3 -m unittest discover -s tools/tests
       - name: Compile the default MoonGram icon before the full build
         run: python3 tools/check_app_icons.py --compile
+      - name: Check disk space for the public Bazel cache
+        id: bazel-cache
+        continue-on-error: true
+        if: ${{ github.event.repository.private == false && (inputs.kind || 'standalone-device') == 'standalone-device' }}
+        shell: bash
+        run: |
+          free_kib=$(df -Pk "$RUNNER_TEMP" | awk 'NR == 2 {print $4}')
+          printf 'Free disk space before the build: %s KiB\n' "$free_kib"
+          if [ "$free_kib" -ge 10485760 ]; then
+            xcode_key=$(xcodebuild -version | shasum -a 256 | cut -c 1-12)
+            printf 'xcode=%s\nenabled=true\n' "$xcode_key" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Restore Bazel compilation results
+        id: bazel-restore
+        if: steps.bazel-cache.outputs.enabled == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
+        timeout-minutes: 5
+        with:
+          path: ${{ runner.temp }}/moongram-bazel-cache
+          key: moongram-bazel-v1-${{ runner.arch }}-${{ steps.bazel-cache.outputs.xcode }}-${{ hashFiles('upstream.lock.json') }}
       - name: Build without real Telegram API credentials
         env:
           BUILD_KIND: ${{ inputs.kind || 'standalone-device' }}
-        run: python3 tools/build.py --configuration build.local.json --kind "$BUILD_KIND" --template --build-number "$((1000 + BUILD_NUMBER))"
+          CACHE_ENABLED: ${{ steps.bazel-cache.outputs.enabled == 'true' && steps.bazel-restore.outcome == 'success' }}
+        shell: bash
+        run: |
+          cache_args=()
+          if [ "$CACHE_ENABLED" = true ]; then
+            cache_args+=(--cache-dir "$RUNNER_TEMP/moongram-bazel-cache")
+          fi
+          python3 tools/build.py --configuration build.local.json --kind "$BUILD_KIND" --template \
+            --build-number "$((1000 + BUILD_NUMBER))" "${cache_args[@]}"
       - name: Verify icon registrations in the built IPA
         run: python3 tools/check_app_icons.py --ipa dist/MoonGram-template-personal*.ipa
       - name: Launch the complete simulator template
@@ -49,6 +78,28 @@ jobs:
             dist/full-smoke/
           if-no-files-found: error
           retention-days: 3
+      - name: Check the cache size before upload
+        id: bazel-size
+        continue-on-error: true
+        if: steps.bazel-cache.outputs.enabled == 'true' && steps.bazel-restore.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          cache="$RUNNER_TEMP/moongram-bazel-cache"
+          if [ -d "$cache" ]; then
+            size_kib=$(du -sk "$cache" | cut -f1)
+            printf 'Bazel cache size: %s KiB\n' "$size_kib"
+            if [ "$size_kib" -le 3145728 ]; then
+              echo 'save=true' >> "$GITHUB_OUTPUT"
+            fi
+          fi
+      - name: Save Bazel compilation results
+        if: steps.bazel-size.outputs.save == 'true' && steps.bazel-restore.outputs.cache-primary-key != ''
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
+        timeout-minutes: 8
+        with:
+          path: ${{ runner.temp }}/moongram-bazel-cache
+          key: ${{ steps.bazel-restore.outputs.cache-primary-key }}
       - name: Remove placeholder configuration
         if: always()
         run: python3 -c 'from pathlib import Path; Path("build.local.json").unlink(missing_ok=True)'

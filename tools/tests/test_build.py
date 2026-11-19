@@ -145,12 +145,14 @@ class BuildTests(unittest.TestCase):
                     }))
                     archive.writestr("Payload/Telegram.app/Telegram", executable())
 
+            cache_dir = folder / "shared cache"
             args = ["build.py", "--kind", "standalone-device", "--template",
-                    "--configuration", str(configuration), "--source", str(source)]
+                    "--configuration", str(configuration), "--source", str(source), "--cache-dir", str(cache_dir)]
             with patch("sys.argv", args), patch("build.platform.system", return_value="Darwin"), \
                  patch("build.ROOT", folder), patch("build.prepare"), patch("build.subprocess.run", side_effect=runner):
                 self.assertEqual(build_main(), 0)
             self.assertEqual(len(captured), 3)
+            self.assertTrue(all(f"--cacheDir={cache_dir}" in arguments for arguments in captured))
             self.assertFalse(any(arg.startswith("--target=") for arg in captured[-1]))
             self.assertTrue((folder / "dist/MoonGram-template-personal.ipa").is_file())
 
