@@ -1,5 +1,7 @@
 name: MoonGram public template (no private API keys)
 on:
+  push:
+    branches: ['codex/ipa-release']
   workflow_dispatch:
     inputs:
       kind:
@@ -21,11 +23,15 @@ jobs:
           persist-credentials: false
       - name: Prepare nonfunctional placeholder API values
         env:
-          BUILD_KIND: ${{ inputs.kind }}
+          BUILD_KIND: ${{ inputs.kind || 'standalone-device' }}
         run: python3 tools/build_configuration.py --kind "$BUILD_KIND" --template
+      - name: Test IPA packaging before the full build
+        run: |
+          python3 tools/prepare.py
+          python3 -m unittest discover -s tools/tests
       - name: Build without real Telegram API credentials
         env:
-          BUILD_KIND: ${{ inputs.kind }}
+          BUILD_KIND: ${{ inputs.kind || 'standalone-device' }}
         run: python3 tools/build.py --configuration build.local.json --kind "$BUILD_KIND" --template --build-number "$((1000 + BUILD_NUMBER))"
       - name: Launch the complete simulator template
         if: inputs.kind == 'standalone-simulator'
@@ -33,7 +39,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: MoonGram-public-template-${{ inputs.kind }}
+          name: MoonGram-public-template-${{ inputs.kind || 'standalone-device' }}
           path: |
             dist/MoonGram-template*.ipa
             dist/MoonGram-template*.json

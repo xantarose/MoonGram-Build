@@ -1,6 +1,7 @@
 import ast
 import contextlib
 import io
+import json
 import os
 import plistlib
 import re
@@ -13,9 +14,11 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from build_configuration import from_api_credentials, validate_configuration, write_private
+from build import build_personal, main as build_main
+from build_configuration import from_api_credentials, template_configuration, validate_configuration, write_private
 from ipa_verification import inspect_macho, verify_ipa
 from package_source import source_files
 
@@ -105,6 +108,62 @@ class BuildTests(unittest.TestCase):
         for data in (executable(encrypted=True), executable()[:-1], executable()[:32], b"not a Mach-O"):
             with self.assertRaises(ValueError):
                 inspect_macho(data)
+
+    def test_personal_app_packaging_uses_one_bazel_target_at_a_time(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            source = folder / "source"
+            source.mkdir()
+            configuration = folder / "build.json"
+            configuration.write_text(json.dumps(template_configuration("standalone-device")))
+            captured = []
+
+            def runner(arguments, **kwargs):
+                if arguments[0] == "xcodebuild":
+                    return SimpleNamespace(stdout="Xcode 27.1\n")
+                captured.append(arguments)
+                flags = shlex.split(next(arg for arg in arguments if arg.startswith("--bazelArguments=")).split("=", 1)[1])
+                self.assertIn("--//Telegram:moongramStandalone", flags)
+                self.assertIn("--//Telegram:moongramRuntimeAPI", flags)
+                self.assertTrue(all(flag.startswith("--") for flag in flags))
+                symlink = source / "bazel-bin"
+                symlink.unlink(missing_ok=True)
+                if "--nobuild" in flags:
+                    return
+                is_entitlements = "--target=//Telegram:TelegramEntitlements.entitlements" in arguments
+                output = folder / ("entitlements-config" if is_entitlements else "ios-config")
+                (output / "Telegram").mkdir(parents=True)
+                symlink.symlink_to(output, target_is_directory=True)
+                if is_entitlements:
+                    (output / "Telegram/TelegramEntitlements.entitlements").write_bytes(plistlib.dumps({}))
+                    return
+                with zipfile.ZipFile(output / "Telegram/Telegram.ipa", "w") as archive:
+                    archive.writestr("Payload/Telegram.app/Info.plist", plistlib.dumps({
+                        "CFBundleIdentifier": "app.moongram.ios.personal",
+                        "CFBundleDisplayName": "MoonGram", "CFBundleExecutable": "Telegram",
+                        "MoonGramStorageMode": "standalone", "MoonGramRuntimeAPIRequired": True,
+                    }))
+                    archive.writestr("Payload/Telegram.app/Telegram", executable())
+
+            args = ["build.py", "--kind", "standalone-device", "--template",
+                    "--configuration", str(configuration), "--source", str(source)]
+            with patch("sys.argv", args), patch("build.platform.system", return_value="Darwin"), \
+                 patch("build.ROOT", folder), patch("build.prepare"), patch("build.subprocess.run", side_effect=runner):
+                self.assertEqual(build_main(), 0)
+            self.assertEqual(len(captured), 3)
+            self.assertFalse(any(arg.startswith("--target=") for arg in captured[-1]))
+            self.assertTrue((folder / "dist/MoonGram-template-personal.ipa").is_file())
+
+    def test_preflight_rejects_app_groups_before_analyzing_app(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            target = source / "bazel-bin/Telegram/TelegramEntitlements.entitlements"
+            target.parent.mkdir(parents=True)
+            target.write_bytes(plistlib.dumps({"com.apple.security.application-groups": ["group.invalid"]}))
+            with patch("build.subprocess.run") as runner:
+                with self.assertRaisesRegex(RuntimeError, "App Group"):
+                    build_personal(["python3", "Make.py"], source, "standalone-device", True, True, [])
+                self.assertEqual(runner.call_count, 1)
 
     def test_make_forwards_quoted_bazel_flags_to_actual_build_invocation(self):
         # Run the real pinned command builder with external build/SDK operations stubbed.
