@@ -41,7 +41,7 @@ static const NSUInteger MTWebBufferLimit = 32 * 1024 * 1024;
 }
 
 - (bool)isWebProxyCarrier { return true; }
-- (void)setGetLogPrefix:(NSString *(^)(void))getLogPrefix {}
+- (void)setGetLogPrefix:(NSString * _Nonnull (^_Nullable)())getLogPrefix {}
 - (void)setUsageCalculationInfo:(MTNetworkUsageCalculationInfo *)info {}
 - (bool)connectToHost:(NSString *)host onPort:(uint16_t)port viaInterface:(NSString *)interface withTimeout:(NSTimeInterval)timeout error:(NSError **)error {
     if (!_url || _closed || _session) return false;
