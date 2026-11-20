@@ -18,7 +18,7 @@ from ipa_verification import verify_ipa
 
 
 def build_personal(command, source, kind, template, preflight_only, build_args):
-    flags = ["--//Telegram:disableProvisioningProfiles", "--jobs=2",
+    flags = ["--//Telegram:disableProvisioningProfiles", f"--jobs={max(2, min(os.cpu_count() or 2, 4))}",
              "--//Telegram:moongramStandalone"]
     if not kind.endswith("simulator"):
         flags += ["--features=disable_legacy_signing", "--features=moongram_unsigned_ipa"]
@@ -39,9 +39,10 @@ def build_personal(command, source, kind, template, preflight_only, build_args):
     if "com.apple.security.application-groups" in plistlib.loads(entitlements.read_bytes()):
         raise RuntimeError("Personal build unexpectedly requests an App Group.")
 
-    run_make([*flags, "--nobuild"])
-    print("Personal build preflight passed. Bazel analyzed the app and verified its signing settings.", flush=True)
-    if not preflight_only:
+    if preflight_only:
+        run_make([*flags, "--nobuild"])
+        print("Personal build preflight passed.", flush=True)
+    else:
         run_make(flags)
 
 
@@ -93,7 +94,7 @@ def main():
             subprocess.run([*command, "build", *build_args,
                             "--codesigningInformationPath=" + str(args.codesigning.resolve())], cwd=source, check=True)
         else:
-            flags = ["--//Telegram:disableProvisioningProfiles", "--jobs=2"]
+            flags = ["--//Telegram:disableProvisioningProfiles", f"--jobs={max(2, min(os.cpu_count() or 2, 4))}"]
             if args.kind == "unsigned-device":
                 flags += ["--features=disable_legacy_signing", "--features=moongram_unsigned_ipa"]
             subprocess.run([*command, "--bazelArguments=" + shlex.join(flags), "build",

@@ -1,7 +1,3 @@
-#if canImport(Display) && canImport(AsyncDisplayKit)
-import AsyncDisplayKit
-import Display
-#endif
 import Combine
 import Foundation
 import MoonGramCore
@@ -9,57 +5,31 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-#if canImport(Display) && canImport(AsyncDisplayKit)
+/// Present from the UIKit window so SwiftUI and its system pickers share a real presentation hierarchy.
 @available(iOS 16.0, *)
-public final class MoonGramScreen: ViewController {
-    private let accountID: Int64
-    private let peerID: Int64?
-    private let nativeGifts: MoonNativeGiftProvider?
-    private let archivePeerID: Int64?
-    private let transport: MoonTransportControls?
-    private var host: UIHostingController<AnyView>?
-
-    public init(accountID: Int64, peerID: Int64? = nil, nativeGifts: MoonNativeGiftProvider? = nil,
-                transport: MoonTransportControls? = nil, archivePeerID: Int64? = nil, pushed: Bool = false) {
-        self.accountID = accountID
-        self.peerID = peerID
-        self.nativeGifts = nativeGifts
-        self.archivePeerID = archivePeerID
-        self.transport = transport
-        super.init(navigationBarPresentationData: nil)
-        self.navigationPresentation = pushed ? .default : .modal
-    }
-
-    required public init(coder: NSCoder) { fatalError("Use init(accountID:peerID:)") }
-
-    public override func loadDisplayNode() {
-        self.displayNode = ASDisplayNode()
-        self.displayNode.backgroundColor = .systemGroupedBackground
-        super.displayNodeDidLoad()
-        let root = MoonRootView(accountID: self.accountID, peerID: self.peerID, nativeGifts: self.nativeGifts, transport: self.transport, archivePeerID: self.archivePeerID, close: { [weak self] in
-            self?.dismiss()
-        })
-        let host = UIHostingController(rootView: AnyView(root))
-        self.addChild(host)
-        self.displayNode.view.addSubview(host.view)
-        host.didMove(toParent: self)
-        self.host = host
-    }
-
-    public override func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
-        super.containerLayoutUpdated(layout, transition: transition)
-        guard let view = self.host?.view else { return }
-        let insets = layout.insets(options: [.statusBar, .input])
-        let top = max(layout.safeInsets.top, insets.top)
-        let bottom = max(layout.safeInsets.bottom, insets.bottom)
-        let left = max(layout.safeInsets.left, insets.left)
-        let right = max(layout.safeInsets.right, insets.right)
-        transition.updateFrame(view: view, frame: CGRect(x: left, y: top,
-            width: max(0, layout.size.width - left - right),
-            height: max(0, layout.size.height - top - bottom)))
+@MainActor
+public enum MoonGramScreen {
+    public static func open(from source: UIViewController, accountID: Int64, peerID: Int64? = nil,
+                            nativeGifts: MoonNativeGiftProvider? = nil, transport: MoonTransportControls? = nil,
+                            archivePeerID: Int64? = nil, dark: Bool) {
+        guard var presenter = source.viewIfLoaded?.window?.rootViewController else { return }
+        while let next = presenter.presentedViewController { presenter = next }
+        guard !presenter.isBeingDismissed, !(presenter is UIHostingController<MoonRootView>) else { return }
+        // The closure retains only a weak reference once the hosting controller owns the root.
+        weak var presented: UIViewController?
+        var controls = transport
+        if let openProxy = transport?.openProxySettings {
+            controls?.openProxySettings = { presented?.dismiss(animated: true, completion: openProxy) }
+        }
+        let root = MoonRootView(accountID: accountID, peerID: peerID, nativeGifts: nativeGifts,
+            transport: controls, archivePeerID: archivePeerID, close: { presented?.dismiss(animated: true) })
+        let host = UIHostingController(rootView: root)
+        presented = host
+        host.modalPresentationStyle = .fullScreen
+        host.overrideUserInterfaceStyle = dark ? .dark : .light
+        presenter.present(host, animated: true)
     }
 }
-#endif
 
 /// Used only by the isolated iOS QA app; it has a separate app container and no Telegram session.
 @available(iOS 16.0, *)
@@ -134,7 +104,8 @@ final class MoonViewModel: ObservableObject {
     }
 
     func mutate(_ transform: (inout MoonSettings) throws -> Void, completion: (() -> Void)? = nil) {
-        guard !self.busy, var candidate = self.settings else { return }
+        guard !self.busy else { return }
+        guard var candidate = self.settings else { self.reload(); return }
         let previous = candidate
         do {
             try transform(&candidate)
@@ -215,9 +186,10 @@ struct MoonRootView: View {
                     self.settingsList
                 }
             }
-            .navigationTitle(self.archivePeerID == nil ? "MoonGram" : "Локальные копии")
+            .navigationTitle(self.archivePeerID == nil ? "MoonGram" : "История сообщений")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) { Button("Готово", action: self.close) }
+                ToolbarItem(placement: .cancellationAction) { Button("Закрыть", action: self.close) }
             }
         }
         .tint(MoonAccent.text)
@@ -250,13 +222,7 @@ struct MoonRootView: View {
             Section {
                 MoonSettingsBanner()
                     .listRowInsets(EdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10))
-                Toggle("Визуалы", isOn: Binding(get: { self.model.settings?.enabled ?? false }, set: { enabled in
-                    self.model.mutate { $0.enabled = enabled }
-                })).tint(MoonAccent.control)
-                Toggle("Оформления друзей", isOn: Binding(get: { self.model.settings?.showFriends ?? true }, set: { enabled in
-                    self.model.mutate { $0.showFriends = enabled }
-                })).tint(MoonAccent.control)
-                Picker("Показывать", selection: Binding(get: { self.model.settings?.effectiveDisplayMode ?? .original }, set: { mode in
+                Picker("Оформление профиля", selection: Binding(get: { self.model.settings?.effectiveDisplayMode ?? .original }, set: { mode in
                     self.model.mutate {
                         if mode == .original { $0.enabled = false }
                         else { $0.enabled = true; $0.displayMode = mode }
@@ -265,7 +231,7 @@ struct MoonRootView: View {
                     ForEach(MoonDisplayMode.allCases, id: \.self) { mode in Text(mode.title).tag(mode) }
                 }
             } footer: {
-                Text("Выключение возвращает реальные данные. Подарки, модели и пресеты сохраняются.")
+                Text("В совместном режиме номера и имена добавляются к данным профиля Telegram.")
             }
             Section("Приватность") {
                 NavigationLink { MoonPrivacyView(model: self.model) } label: { Label("Гостевой режим", systemImage: "eye.slash") }
@@ -273,9 +239,30 @@ struct MoonRootView: View {
             Section("Моё оформление") {
                 NavigationLink { MoonProfileEditor(model: self.model) } label: { Label("Профиль и балансы", systemImage: "person.crop.circle") }
                 NavigationLink { MoonGiftsView(model: self.model) } label: {
-                    Label("Коллекции · \(self.model.profile.gifts.count)", systemImage: "gift")
+                    LabeledContent { Text(String(self.model.profile.gifts.count)) } label: { Label("Подарки", systemImage: "gift") }
                 }
                 NavigationLink { MoonPresetsView(model: self.model) } label: { Label("Пресеты", systemImage: "square.stack") }
+            }
+            if let transport = self.transport {
+                Section {
+                    NavigationLink { MoonTransportView(controls: transport) } label: { Label("Подключение", systemImage: "network") }
+                }
+            }
+            Section("Данные") {
+                NavigationLink { MoonVaultView(model: self.model) } label: { Label("История сообщений", systemImage: "clock.arrow.circlepath") }
+                NavigationLink { self.transferList } label: { Label("Обмен оформлением", systemImage: "square.and.arrow.up") }
+            }
+        }
+        .scrollDismissesKeyboard(.interactively)
+    }
+
+    private var transferList: some View {
+        List {
+            Section {
+                Toggle("Оформления друзей", isOn: Binding(get: { self.model.settings?.showFriends ?? true }, set: { enabled in
+                    self.model.mutate { $0.showFriends = enabled }
+                })).tint(MoonAccent.control)
+                NavigationLink { MoonSyncView(model: self.model) } label: { Label("Синхронизация", systemImage: "arrow.triangle.2.circlepath") }
             }
             Section {
                 Toggle("Включить балансы в экспорт", isOn: self.$includeBalances).tint(MoonAccent.control)
@@ -297,23 +284,8 @@ struct MoonRootView: View {
                     } catch { self.model.error = error.localizedDescription }
                 }
             } header: { Text("Оформление друга") } footer: { Text("Сверьте ID с другом. Файл оформления сам по себе не подтверждает владельца аккаунта.") }
-            if let transport = self.transport {
-                Section {
-                    NavigationLink { MoonTransportView(controls: transport) } label: { Label("Подключение", systemImage: "network") }
-                }
-            }
-            Section("Обмен с друзьями") {
-                NavigationLink { MoonSyncView(model: self.model) } label: { Label("Синхронизация", systemImage: "arrow.triangle.2.circlepath") }
-            }
-            Section("Хранилище") {
-                NavigationLink { MoonVaultView(model: self.model) } label: { Label("Локальные копии", systemImage: "lock.doc") }
-            }
-            Section {
-                Text("MoonGram — неофициальный клиент на основе Telegram.").font(.footnote).foregroundStyle(.secondary)
-                Text("Визуальные Stars, Premium и коллекционные предметы не меняют настоящий баланс, подписку и владение активами.").font(.footnote).foregroundStyle(.secondary)
-            }
         }
-        .disabled(self.model.busy || self.model.settings == nil)
+        .navigationTitle("Обмен оформлением")
         .scrollDismissesKeyboard(.interactively)
     }
 }

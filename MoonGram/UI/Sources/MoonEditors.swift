@@ -42,7 +42,7 @@ struct MoonProfileEditor: View {
         .navigationTitle("Профиль и балансы")
         .navigationBarTitleDisplayMode(.inline)
         .scrollDismissesKeyboard(.interactively)
-        .moonBottomAction("Сохранить", busy: self.model.busy, action: self.save)
+        .moonSaveAction(busy: self.model.busy, action: self.save)
     }
 
     private func save() {
@@ -59,6 +59,7 @@ struct MoonProfileEditor: View {
                 profile.stars = value
             }
             profile.walletBalance = self.balance.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : try MoonAmount(self.balance)
+            if let amount = profile.walletBalance, amount.nanoUnits == nil { throw MoonError.invalid("баланс превышает диапазон кошелька Telegram") }
             try profile.validate()
             self.model.saveProfile(profile) { self.dismiss() }
         } catch { self.model.error = error.localizedDescription }
@@ -75,7 +76,7 @@ private struct MoonIdentitySection: View {
     enum Kind {
         case username, number
 
-        var title: String { self == .username ? "Визуальные юзернеймы" : "Визуальные номера" }
+        var title: String { self == .username ? "Имена пользователя" : "Номера телефона" }
         var add: String { self == .username ? "Добавить юзернейм" : "Добавить номер" }
         var placeholder: String { self == .username ? "username" : "+888 0000 0000" }
         var symbol: String { self == .username ? "at" : "number" }
@@ -117,7 +118,7 @@ private struct MoonIdentitySection: View {
                 .background(.background, in: RoundedRectangle(cornerRadius: 13))
                 .overlay {
                     RoundedRectangle(cornerRadius: 13)
-                        .strokeBorder(MoonAccent.control.opacity(self.focusedID == value.id ? 1 : 0.62))
+                        .strokeBorder(MoonAccent.control.opacity(self.focusedID == value.id ? 1 : 0.8))
                         .allowsHitTesting(false)
                 }
                 .listRowSeparator(.hidden)
@@ -125,7 +126,7 @@ private struct MoonIdentitySection: View {
             Button {
                 let row = MoonIdentityField()
                 withAnimation(self.reduceMotion ? nil : .easeOut(duration: 0.22)) { self.values.append(row) }
-                self.focusedID = row.id
+                Task { @MainActor in self.focusedID = row.id }
             } label: {
                 Label(self.kind.add, systemImage: "plus.circle").frame(minHeight: 44)
             }
@@ -198,6 +199,7 @@ struct MoonPresetsView: View {
 struct MoonGiftsView: View {
     @ObservedObject var model: MoonViewModel
     @State private var search = ""
+    @State private var collection: String?
 
     var body: some View {
         List {
@@ -205,15 +207,21 @@ struct MoonGiftsView: View {
                 Section {
                     VStack(spacing: 12) {
                         Image(systemName: "gift").font(.largeTitle).accessibilityHidden(true)
-                        Text("Первый подарок — твой дизайн").font(.headline)
-                        Text("Выбери модель, фон и узор или добавь своё изображение.").foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        Text("Подарков пока нет").font(.headline)
+                        Text("Нажми плюс, чтобы выбрать подарок из каталога Telegram.").foregroundStyle(.secondary).multilineTextAlignment(.center)
                     }.frame(maxWidth: .infinity).padding(.vertical, 24)
+                }
+            }
+            if self.collections.count > 1 {
+                Picker("Коллекция", selection: self.$collection) {
+                    Text("Все подарки").tag(String?.none)
+                    ForEach(self.collections, id: \.self) { name in Text(name.isEmpty ? "Без коллекции" : name).tag(Optional(name)) }
                 }
             }
             if !self.model.profile.gifts.isEmpty && self.visibleGifts.isEmpty {
                 Section { Text("Подарки не найдены").foregroundStyle(.secondary) }
             }
-            ForEach(self.collections, id: \.self) { collection in
+            ForEach(Array(Set(self.visibleGifts.map(\.collection))).sorted(), id: \.self) { collection in
                 Section(collection.isEmpty ? "Без коллекции" : collection) {
                     ForEach(self.visibleGifts.filter { $0.collection == collection }) { gift in
                         NavigationLink { MoonGiftEditor(model: self.model, gift: gift) } label: {
@@ -231,28 +239,27 @@ struct MoonGiftsView: View {
         }
         .navigationTitle("Коллекции")
         .searchable(text: self.$search, prompt: "Название или номер")
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            MoonActionDock {
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
                 NavigationLink { MoonGiftEditor(model: self.model, gift: MoonGift()) } label: {
-                    Label("Создать подарок", systemImage: "plus")
-                        .frame(maxWidth: .infinity, minHeight: 36)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(MoonAccent.control)
-                .disabled(self.model.profile.gifts.count >= 128)
+                    Label("Добавить подарок", systemImage: "plus")
+                }.disabled(self.model.profile.gifts.count >= 128)
             }
+        }
+        .onChange(of: self.collections) { names in
+            if let selection = self.collection, !names.contains(selection) { self.collection = nil }
         }
     }
 
     private var visibleGifts: [MoonGift] {
         let query = self.search.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return self.model.profile.gifts }
         return self.model.profile.gifts.filter { gift in
-            [gift.title, gift.number, gift.collection].contains { $0.localizedCaseInsensitiveContains(query) }
+            (self.collection == nil || self.collection == gift.collection) && (query.isEmpty ||
+                [gift.title, gift.number, gift.modelName, gift.collection].contains { $0.localizedCaseInsensitiveContains(query) })
         }
     }
 
-    private var collections: [String] { Array(Set(self.visibleGifts.map(\.collection))).sorted() }
+    private var collections: [String] { Array(Set(self.model.profile.gifts.map(\.collection))).sorted() }
 }
 
 @available(iOS 16.0, *)
@@ -268,57 +275,60 @@ struct MoonGiftEditor: View {
 
     var body: some View {
         Form {
-            Section {
-                MoonGiftArtwork(gift: self.gift, nativeGifts: self.model.nativeGifts).frame(height: 220).clipShape(RoundedRectangle(cornerRadius: 20))
-                    .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
-            }
-            Section("Коллекционный предмет") {
-                TextField("Название", text: self.$gift.title).focused(self.$titleFocused)
-                TextField("Номер", text: self.$gift.number)
-                TextField("Коллекция", text: self.$gift.collection)
-                if self.model.nativeGifts != nil {
-                    Button("Модель, фон и узор из Telegram") { self.choosingTelegramGift = true }
-                }
-                if self.gift.telegram != nil {
-                    Button("Использовать своё изображение") { self.gift.telegram = nil }
-                }
-                if self.gift.telegram == nil {
-                    TextField("Название модели", text: self.$gift.modelName)
-                    Picker("Модель", selection: self.$gift.model) {
-                        ForEach(MoonModel.allCases, id: \.self) { model in Label(model.rawValue, systemImage: model.symbol).tag(model) }
+            if self.model.nativeGifts != nil {
+                Section {
+                    Button { self.choosingTelegramGift = true } label: {
+                        Label(self.gift.telegram == nil ? "Выбрать из каталога Telegram" : "Изменить модель, фон и узор", systemImage: "gift")
                     }
-                    Button("Загрузить свою модель") { self.importingArtwork = true }
-                    if self.gift.artwork != nil { Button("Убрать изображение", role: .destructive) { self.gift.artwork = nil } }
-                } else {
-                    LabeledContent("Модель", value: self.gift.modelName)
                 }
+
             }
-            if self.gift.telegram == nil { Section {
-                Picker("Узор", selection: self.$gift.pattern) {
-                    ForEach(MoonPattern.allCases, id: \.self) { pattern in Text(pattern.title).tag(pattern) }
+            if self.showsDetails {
+                Section {
+                    MoonGiftArtwork(gift: self.gift, nativeGifts: self.model.nativeGifts).frame(height: 144).clipShape(RoundedRectangle(cornerRadius: 16))
                 }
-                ColorPicker("Фон", selection: Binding(get: { Color(moonHex: self.gift.backdrop) }, set: { self.gift.backdrop = $0.moonHex }), supportsOpacity: false)
-                ColorPicker("Цвет модели и узора", selection: Binding(get: { Color(moonHex: self.gift.symbolColor) }, set: { self.gift.symbolColor = $0.moonHex }), supportsOpacity: false)
-            } header: { Text("Оформление") } footer: { Text("Это предмет оформления MoonGram. Выпуск NFT и операции с настоящими подарками здесь не выполняются.") } }
+                Section("Коллекционный предмет") {
+                    moonField("Название", placeholder: "Название подарка", value: self.$gift.title).focused(self.$titleFocused)
+                    moonField("Номер", placeholder: "1", value: self.$gift.number)
+                    moonField("Коллекция", placeholder: "Без коллекции", value: self.$gift.collection)
+                    if self.gift.telegram == nil {
+                        TextField("Название модели", text: self.$gift.modelName)
+                        Picker("Модель", selection: self.$gift.model) {
+                            ForEach(MoonModel.allCases, id: \.self) { model in Label(model.rawValue, systemImage: model.symbol).tag(model) }
+                        }
+                        Button("Загрузить свою модель") { self.importingArtwork = true }
+                        if self.gift.artwork != nil { Button("Убрать изображение", role: .destructive) { self.gift.artwork = nil } }
+                    } else {
+                        LabeledContent("Модель", value: self.gift.modelName)
+                    }
+                }
+                if self.gift.telegram == nil { Section {
+                    Picker("Узор", selection: self.$gift.pattern) {
+                        ForEach(MoonPattern.allCases, id: \.self) { pattern in Text(pattern.title).tag(pattern) }
+                    }
+                    ColorPicker("Фон", selection: Binding(get: { Color(moonHex: self.gift.backdrop) }, set: { self.gift.backdrop = $0.moonHex }), supportsOpacity: false)
+                    ColorPicker("Цвет модели и узора", selection: Binding(get: { Color(moonHex: self.gift.symbolColor) }, set: { self.gift.symbolColor = $0.moonHex }), supportsOpacity: false)
+                } header: { Text("Оформление") } footer: { Text("Это предмет оформления MoonGram. Выпуск NFT и операции с настоящими подарками здесь не выполняются.") } }
+            }
             if self.model.profile.gifts.contains(where: { $0.id == self.gift.id }) {
                 Section { Button("Удалить подарок", role: .destructive) { self.confirmDelete = true } }
             }
         }
-        .navigationTitle(self.gift.title)
-        .task {
-            if self.focusTitleForQA { self.titleFocused = true }
-        }
-        .sheet(isPresented: self.$choosingTelegramGift) {
+        .navigationTitle(self.showsDetails ? self.gift.title : "Новый подарок")
+        .navigationDestination(isPresented: self.$choosingTelegramGift) {
             if let provider = self.model.nativeGifts {
-                MoonNativeEditor(provider: provider, gift: self.gift) { gift in
-                    self.gift = gift
+                provider.editor(for: self.gift) { selected in
+                    self.gift = selected
                     self.choosingTelegramGift = false
                 }
             }
         }
+        .task {
+            if self.focusTitleForQA { self.titleFocused = true }
+        }
         .navigationBarTitleDisplayMode(.inline)
         .scrollDismissesKeyboard(.interactively)
-        .moonBottomAction("Сохранить", busy: self.model.busy) {
+        .moonSaveAction(busy: self.model.busy, enabled: self.showsDetails) {
             var profile = self.model.profile
             if let index = profile.gifts.firstIndex(where: { $0.id == self.gift.id }) {
                 profile.gifts[index] = self.gift
@@ -342,5 +352,9 @@ struct MoonGiftEditor: View {
                 self.model.saveProfile(profile) { self.dismiss() }
             }
         }
+    }
+
+    private var showsDetails: Bool {
+        self.gift.telegram != nil || self.model.nativeGifts == nil || self.model.profile.gifts.contains { $0.id == self.gift.id }
     }
 }

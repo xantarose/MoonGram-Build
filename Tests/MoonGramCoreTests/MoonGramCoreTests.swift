@@ -123,6 +123,15 @@ final class MoonGramCoreTests: XCTestCase {
         XCTAssertEqual(try MoonArchive.decode(MoonArchive(profile: profile).encoded()).profile.stars, Int64.max)
     }
 
+    func testNativeProfileMergesHandlesAndConvertsWalletWithoutFloatingPoint() throws {
+        XCTAssertEqual(MoonProfile.profileValues(original: ["Main", "other"], custom: ["main", "extra"], mode: .both), ["Main", "other", "extra"])
+        XCTAssertEqual(MoonProfile.profileValues(original: ["Main"], custom: ["other"], mode: .visual), ["other"])
+        XCTAssertEqual(MoonProfile.profileValues(original: ["Main"], custom: [], mode: .visual), ["Main"])
+        XCTAssertEqual(try MoonAmount("0,29").nanoUnits, 290_000_000)
+        XCTAssertEqual(try MoonAmount("9223372036.854775807").nanoUnits, Int64.max)
+        XCTAssertNil(try MoonAmount("9223372036.854775808").nanoUnits)
+    }
+
     func testExperimentIsDisabledAndScopedToOnePeer() throws {
         let off = MoonExperiments()
         XCTAssertFalse(off.allows(peerID: 2, media: false))

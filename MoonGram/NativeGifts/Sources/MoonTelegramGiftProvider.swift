@@ -10,6 +10,21 @@ import TelegramCore
 import TelegramPresentationData
 import UIKit
 
+/// Reports cosmetic catalog entries without creating a Telegram gift reference or ownership record.
+public func moonCatalogGifts(accountID: Int64, peerID: Int64) -> Signal<[MoonGift], NoError> {
+    return Signal { subscriber in
+        func emit() {
+            let profile = MoonStore.shared.visibleProfile(accountID: accountID, peerID: peerID)
+            subscriber.putNext(profile?.gifts.filter { $0.telegram != nil } ?? [])
+        }
+        let observer = NotificationCenter.default.addObserver(forName: .moonGramSettingsDidChange, object: nil, queue: .main) { change in
+            if change.userInfo?["accountID"] as? Int64 == accountID { emit() }
+        }
+        emit()
+        return ActionDisposable { NotificationCenter.default.removeObserver(observer) }
+    } |> distinctUntilChanged
+}
+
 @available(iOS 16.0, *)
 @MainActor
 public final class MoonTelegramGiftProvider: MoonNativeGiftProvider {
@@ -33,8 +48,8 @@ public final class MoonTelegramGiftProvider: MoonNativeGiftProvider {
         MoonTelegramGiftView(provider: self, gift: gift)
     }
 
-    public func editor(for gift: MoonGift, completion: @escaping (MoonGift) -> Void) -> UIViewController {
-        UIHostingController(rootView: MoonTelegramGiftEditor(provider: self, gift: gift, completion: completion))
+    public func editor(for gift: MoonGift, completion: @escaping (MoonGift) -> Void) -> AnyView {
+        AnyView(MoonTelegramGiftEditor(provider: self, gift: gift, completion: completion))
     }
 
     func attributes(baseGiftID: Int64, refresh: Bool = false, next: @escaping ([StarGift.UniqueGift.Attribute]?) -> Void) -> Disposable {
@@ -183,7 +198,8 @@ private final class MoonTelegramGiftView: UIView, UIContextMenuInteractionDelega
               self.bounds.width > 0, self.bounds.height > 0 else { return }
         let data = self.provider.context.sharedContext.currentPresentationData.with { $0 }
         let component = GiftItemComponent(context: self.provider.context, style: .glass, theme: data.theme, strings: data.strings,
-            subject: .preview(attributes: self.attributes, rarity: nil), mode: .profile,
+            subject: .preview(attributes: self.attributes, rarity: nil),
+            ribbon: GiftItemComponent.Ribbon(text: "#" + self.gift.number, font: .monospaced, color: .custom(Int32(self.gift.backdrop, radix: 16) ?? 0, Int32(self.gift.symbolColor, radix: 16) ?? 0)), mode: .profile,
             allowAnimations: !UIAccessibility.isReduceMotionEnabled, action: nil, contextAction: nil)
         let size = self.host.update(transition: .immediate, component: AnyComponent(component), environment: {}, containerSize: self.bounds.size)
         if let view = self.host.view {
@@ -235,7 +251,8 @@ private final class MoonTelegramGiftCatalog: ObservableObject {
         |> deliverOnMainQueue).start(next: { [weak self] gifts in
             guard let self, let gifts else { return }
             self.gifts = gifts.compactMap { gift -> StarGift.Gift? in
-                if case let .generic(value) = gift { return value }
+                if case let .generic(value) = gift, let title = value.title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   value.upgradeStars != nil || (value.upgradeVariantsCount ?? 0) > 0 { return value }
                 return nil
             }
             self.catalogLoaded = true
@@ -313,7 +330,6 @@ private struct MoonTelegramGiftEditor: View {
     let gift: MoonGift
     let completion: (MoonGift) -> Void
     @StateObject private var catalog: MoonTelegramGiftCatalog
-    @SwiftUI.Environment(\.dismiss) private var dismiss
 
     init(provider: MoonTelegramGiftProvider, gift: MoonGift, completion: @escaping (MoonGift) -> Void) {
         self.provider = provider
@@ -323,51 +339,78 @@ private struct MoonTelegramGiftEditor: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                if let selected = self.catalog.applying(to: self.gift) {
-                    Section { MoonTelegramNativePreview(provider: self.provider, gift: selected).id(selected.telegram).id(self.catalog.revision).frame(height: 240) }
-                }
-                Section {
-                    if !self.catalog.catalogLoaded { ProgressView("Загружаем каталог Telegram…") }
-                    if self.catalog.catalogLoaded && self.catalog.gifts.isEmpty {
-                        Text("Каталог пока недоступен.").foregroundStyle(.secondary)
-                        Button("Загрузить каталог снова") { self.catalog.refreshCatalog() }
-                    }
-                    Picker("Подарок", selection: Binding(get: { self.catalog.baseGiftID }, set: { self.catalog.selectGift($0) })) {
-                        Text("Выберите подарок").tag(Int64(0))
-                        ForEach(self.catalog.gifts, id: \.id) { gift in
-                            Text(gift.title ?? "Подарок \(gift.id)").tag(gift.id)
-                        }
-                    }
-                    if self.catalog.baseGiftID != 0 {
-                        if self.catalog.loading { ProgressView("Загружаем модели…") }
-                        Picker("Модель", selection: self.$catalog.modelFileID) {
-                            ForEach(self.catalog.models) { Text($0.name).tag($0.id) }
-                        }
-                        Picker("Узор", selection: self.$catalog.patternFileID) {
-                            ForEach(self.catalog.patterns) { Text($0.name).tag($0.id) }
-                        }
-                        Picker("Фон", selection: self.$catalog.backdropID) {
-                            ForEach(self.catalog.backdrops) { Text($0.name).tag(Optional($0.id)) }
-                        }
-                        if !self.catalog.loading && self.catalog.models.isEmpty { Text("Для этого подарка варианты не получены.").foregroundStyle(.secondary) }
-                        Button("Обновить варианты") { self.catalog.loadAttributes(refresh: true) }
-                    }
-                } footer: {
-                    Text("Выбирается только оформление из каталога Telegram. Покупка, выпуск NFT и изменение настоящих подарков здесь не выполняются.")
-                }
+        Form {
+            if let selected = self.catalog.applying(to: self.gift) {
+                Section { MoonTelegramNativePreview(provider: self.provider, gift: selected).id(selected.telegram).id(self.catalog.revision).frame(height: 240) }
             }
-            .navigationTitle("Подарок Telegram")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) { Button("Отмена") { self.dismiss() } }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Выбрать") { if let gift = self.catalog.applying(to: self.gift) { self.completion(gift) } }
-                        .disabled(self.catalog.applying(to: self.gift) == nil)
+            Section {
+                if !self.catalog.catalogLoaded { ProgressView("Загружаем каталог Telegram…") }
+                if self.catalog.catalogLoaded && self.catalog.gifts.isEmpty {
+                    Text("Коллекционные подарки с вариантами оформления пока недоступны.").foregroundStyle(.secondary)
+                    Button("Загрузить каталог снова") { self.catalog.refreshCatalog() }
+                }
+                NavigationLink {
+                    MoonCatalogSearch(gifts: self.catalog.gifts, selected: self.catalog.baseGiftID, select: self.catalog.selectGift)
+                } label: {
+                    LabeledContent("Подарок", value: self.catalog.gifts.first(where: { $0.id == self.catalog.baseGiftID })?.title ?? "Выбрать")
+                }
+                if self.catalog.baseGiftID != 0 {
+                    if self.catalog.loading { ProgressView("Загружаем модели…") }
+                    Picker("Модель", selection: self.$catalog.modelFileID) {
+                        ForEach(self.catalog.models) { Text($0.name).tag($0.id) }
+                    }
+                    Picker("Узор", selection: self.$catalog.patternFileID) {
+                        ForEach(self.catalog.patterns) { Text($0.name).tag($0.id) }
+                    }
+                    Picker("Фон", selection: self.$catalog.backdropID) {
+                        ForEach(self.catalog.backdrops) { Text($0.name).tag(Optional($0.id)) }
+                    }
+                    if !self.catalog.loading && self.catalog.models.isEmpty { Text("Для этого подарка варианты не получены.").foregroundStyle(.secondary) }
+                    Button("Обновить варианты") { self.catalog.loadAttributes(refresh: true) }
+                }
+            } footer: {
+                Text("Выбирается только оформление из каталога Telegram. Покупка, выпуск NFT и изменение настоящих подарков здесь не выполняются.")
+            }
+        }
+        .navigationTitle("Подарок Telegram")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("Выбрать") { if let gift = self.catalog.applying(to: self.gift) { self.completion(gift) } }
+                    .disabled(self.catalog.applying(to: self.gift) == nil)
+            }
+        }
+    }
+}
+
+@available(iOS 16.0, *)
+private struct MoonCatalogSearch: View {
+    let gifts: [StarGift.Gift]
+    let selected: Int64
+    let select: (Int64) -> Void
+    @State private var search = ""
+    @SwiftUI.Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        List {
+            let filtered = self.gifts.filter { self.search.isEmpty || ($0.title ?? "").localizedCaseInsensitiveContains(self.search) }
+                .sorted { ($0.title ?? "").localizedStandardCompare($1.title ?? "") == .orderedAscending }
+            if filtered.isEmpty { Text("Подарки не найдены").foregroundStyle(.secondary) }
+            ForEach(filtered, id: \.id) { gift in
+                Button {
+                    self.select(gift.id)
+                    self.dismiss()
+                } label: {
+                    HStack {
+                        Text(gift.title ?? "").foregroundStyle(.primary)
+                        Spacer()
+                        if self.selected == gift.id { Image(systemName: "checkmark") }
+                    }
                 }
             }
         }
+        .navigationTitle("Каталог Telegram")
+        .searchable(text: self.$search, prompt: "Название подарка")
     }
 }
 

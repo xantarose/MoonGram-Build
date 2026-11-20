@@ -9,55 +9,35 @@ import TelegramCore
 public enum MoonVaultBridge {
     private static let observers = MoonDeletionObservers()
     public static func loadedMessage(context: AccountContext, message: EngineRawMessage) {
-        let accountID = context.account.peerId.id._internalGetInt64Value()
-        guard self.isAllowed(context: context, message: message, media: false), !message.text.isEmpty else { return }
+        let owner = context.account.peerId
+        guard message.id.namespace == Namespaces.Message.Cloud, message.id.peerId.namespace == Namespaces.Peer.CloudUser,
+              !message.flags.contains(.Incoming), message.author?.id == owner, message.forwardInfo == nil,
+              !message.isCopyProtected() else { return }
+        let accountID = owner.id._internalGetInt64Value()
+        guard let settings = try? MoonStore.shared.settings(accountID: accountID), settings.recordOwnMessages == true || settings.keepOwnMedia == true else { return }
+        let edited = message.attributes.compactMap { ($0 as? EditedMessageAttribute)?.date }.first
+        var entry = MoonVaultEntry(peerID: message.id.peerId.id._internalGetInt64Value(), namespace: message.id.namespace,
+            messageID: message.id.id, timestamp: message.timestamp, text: settings.recordOwnMessages == true ? message.text : "")
+        entry.editTimestamp = edited ?? message.timestamp
         self.observers.observe(context: context)
-        MoonVault.shared.capture(self.entry(message), accountID: accountID)
-    }
-
-    /// Observes only the resource fetched by the real gallery. Does not postpone consumed/read events.
-    public static func viewOnce(context: AccountContext, message: EngineRawMessage, cachedVideoPath: String?) -> Disposable? {
-        guard self.isAllowed(context: context, message: message, media: true), message.minAutoremoveOrClearTimeout == viewOnceTimeout else { return nil }
-        self.observers.observe(context: context)
-        var resource: EngineMediaResource?
-        var entry = self.entry(message)
-        for media in message.media {
-            if let image = media as? TelegramMediaImage,
-               let representation = largestRepresentationForPhoto(image, maxSize: PixelDimensions(width: 4096, height: 4096)) {
-                resource = EngineMediaResource(representation.resource)
-                entry.kind = .photo
-                break
-            } else if let file = media as? TelegramMediaFile, file.isVideo, !file.isInstantVideo {
-                entry.kind = .video
-                if let cachedVideoPath = cachedVideoPath {
-                    MoonVault.shared.capture(entry, accountID: context.account.peerId.id._internalGetInt64Value(), mediaPath: cachedVideoPath)
-                    return nil
-                }
-                resource = EngineMediaResource(file.resource)
-                break
-            }
+        if settings.recordOwnMessages == true && (!entry.text.isEmpty || edited != nil) {
+            MoonVault.shared.capture(entry, accountID: accountID)
         }
-        guard let resource = resource else { return nil }
-        let snapshot = entry
-        return (context.engine.resources.data(resource: resource, pathExtension: nil, waitUntilFetchStatus: false,
-                                              incremental: false, attemptSynchronously: false)
-                |> filter { $0.isComplete }
-                |> take(1)
-                |> timeout(20.0, queue: Queue.concurrentDefaultQueue(), alternate: .complete())).start(next: { data in
-            MoonVault.shared.capture(snapshot, accountID: context.account.peerId.id._internalGetInt64Value(), mediaPath: data.path)
-        })
-    }
-
-    private static func isAllowed(context: AccountContext, message: EngineRawMessage, media: Bool) -> Bool {
-        guard message.flags.contains(.Incoming), message.id.namespace == Namespaces.Message.Cloud,
-              message.id.peerId.namespace == Namespaces.Peer.CloudUser else { return false }
-        return (try? MoonStore.shared.settings(accountID: context.account.peerId.id._internalGetInt64Value()).experiments)?
-            .allows(peerID: message.id.peerId.id._internalGetInt64Value(), media: media) == true
-    }
-
-    private static func entry(_ message: EngineRawMessage) -> MoonVaultEntry {
-        MoonVaultEntry(peerID: message.id.peerId.id._internalGetInt64Value(), namespace: message.id.namespace, messageID: message.id.id,
-                       timestamp: message.timestamp, text: message.text)
+        guard settings.keepOwnMedia == true else { return }
+        for medium in message.media {
+            let resource: EngineMediaResource.Id
+            if let photo = medium as? TelegramMediaImage, let image = largestRepresentationForPhoto(photo, maxSize: PixelDimensions(width: 4096, height: 4096)) {
+                resource = EngineMediaResource.Id(image.resource.id)
+                entry.kind = .photo
+            } else if let file = medium as? TelegramMediaFile, file.isVideo && !file.isInstantVideo {
+                resource = EngineMediaResource.Id(file.resource.id)
+                entry.kind = .video
+            } else { continue }
+            if let path = context.engine.resources.completedResourcePath(id: resource) {
+                MoonVault.shared.capture(entry, accountID: accountID, mediaPath: path)
+            }
+            break
+        }
     }
 }
 

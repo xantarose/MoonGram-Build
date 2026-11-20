@@ -1,6 +1,7 @@
 import AVKit
 import Combine
 import Foundation
+import ImageIO
 import MoonGramCore
 import MoonGramVault
 import SwiftUI
@@ -10,8 +11,8 @@ import UIKit
 struct MoonVaultView: View {
     @ObservedObject var model: MoonViewModel
     var chatID: Int64? = nil
-    @State private var saveMessages = false
-    @State private var saveMedia = false
+    @State private var openingMedia = false
+    @State private var requestID: UUID?
     @State private var entries: [MoonVaultEntry] = []
     @State private var loading = false
     @State private var note: String?
@@ -20,27 +21,16 @@ struct MoonVaultView: View {
 
     var body: some View {
         List {
-            if let chatID = self.chatID {
-                Section {
-                    Toggle("Копии входящих сообщений", isOn: self.$saveMessages).tint(MoonAccent.control)
-                    Toggle("Копии открытых одноразовых фото и видео", isOn: self.$saveMedia).tint(MoonAccent.control)
-                    Button("Применить к этому чату") {
-                        self.model.mutate {
-                            let experiments = MoonExperiments(testPeerID: chatID, saveLoadedMessages: self.saveMessages, saveViewOnceMedia: self.saveMedia)
-                            try experiments.validate()
-                            $0.experiments = experiments
-                        }
-                    }
-                    .disabled(self.model.busy)
-                } footer: {
-                    Text("Включайте с согласия собеседника. Настройка относится к этому чату. Предыдущий выбранный чат перестанет сохранять новые копии.")
-                }
-            } else {
-                Section {
-                    Text("Открой профиль собеседника и выбери «Локальные копии», чтобы настроить этот чат.")
-                        .foregroundStyle(.secondary)
-                }
-            }
+            Section {
+                Toggle("История моих сообщений", isOn: Binding(get: { self.model.settings?.recordOwnMessages == true }, set: { value in
+                    self.model.mutate { $0.recordOwnMessages = value }
+                }))
+                Toggle("Копии моих фото и видео", isOn: Binding(get: { self.model.settings?.keepOwnMedia == true }, set: { value in
+                    self.model.mutate { $0.keepOwnMedia = value }
+                }))
+            } footer: {
+                Text("Для личных чатов. История сохраняет увиденные на этом устройстве версии отправленного тобой текста и отмечает удаление. Медиа сохраняются, когда файл твоего сообщения доступен на устройстве.")
+            }.tint(MoonAccent.control).disabled(self.model.busy)
             Section {
                 Button("Обновить список", action: self.reload)
                 if self.loading { ProgressView() }
@@ -49,7 +39,7 @@ struct MoonVaultView: View {
             }
             Section {
                 if self.visibleEntries.isEmpty && !self.loading {
-                    Text("Снимков пока нет. Включите эксперимент для друга, затем откройте тестовый чат или медиа.").foregroundStyle(.secondary)
+                    Text("Здесь появятся сохранённые сообщения и медиа.").foregroundStyle(.secondary)
                 }
                 ForEach(self.visibleEntries) { entry in
                     VStack(alignment: .leading, spacing: 8) {
@@ -60,13 +50,30 @@ struct MoonVaultView: View {
                             Text(Date(timeIntervalSince1970: Double(entry.timestamp)), style: .date).font(.caption).foregroundStyle(.secondary)
                         }
                         if !entry.text.isEmpty { Text(entry.text).textSelection(.enabled) }
+                        if let versions = entry.priorTexts, !versions.isEmpty {
+                            DisclosureGroup("Предыдущие версии · \(versions.count)") {
+                                ForEach(Array(versions.indices.reversed()), id: \.self) { index in
+                                    Text(versions[index]).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                        }
                         if entry.mediaFile != nil {
                             Button(entry.kind == .video ? "Открыть сохранённое видео" : "Открыть сохранённое фото") {
+                                guard self.requestID == nil else { return }
+                                let request = UUID()
+                                self.requestID = request
                                 self.loading = true
                                 MoonVault.shared.preview(accountID: self.model.accountID, entry: entry) { result in
+                                    guard self.requestID == request else {
+                                        if case let .success(url) = result { try? FileManager.default.removeItem(at: url) }
+                                        return
+                                    }
+                                    self.requestID = nil
                                     self.loading = false
                                     switch result {
-                                    case let .success(url): self.preview = MoonVaultPreview(url: url, kind: entry.kind)
+                                    case let .success(url):
+                                        self.preview = MoonVaultPreview(url: url, kind: entry.kind)
+                                        self.openingMedia = true
                                     case let .failure(error): self.model.error = error.localizedDescription
                                     }
                                 }
@@ -75,22 +82,18 @@ struct MoonVaultView: View {
                     }.padding(.vertical, 6)
                     .swipeActions { Button("Удалить копию", role: .destructive) { self.deleting = entry } }
                 }
-            } header: { Text("Сохранённые снимки") } footer: { Text("Сохраняется только уже полученное содержимое. Удалённое до загрузки сообщение восстановить нельзя; захват медиа при медленной сети может не успеть завершиться.") }
+            } header: { Text("Архив") }
         }
-        .navigationTitle("Локальные копии")
+        .navigationTitle("История сообщений")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            let experiments = self.model.settings?.experiments ?? MoonExperiments()
-            if self.chatID != nil, experiments.testPeerID == self.chatID {
-                self.saveMessages = experiments.saveLoadedMessages
-                self.saveMedia = experiments.saveViewOnceMedia
-            } else {
-                self.saveMessages = false
-                self.saveMedia = self.chatID != nil
-            }
-            self.reload()
+        .onAppear(perform: self.reload)
+        .onDisappear { self.requestID = nil }
+        .navigationDestination(isPresented: self.$openingMedia) {
+            if let preview = self.preview { MoonVaultMediaView(preview: preview) }
         }
-        .sheet(item: self.$preview) { preview in MoonVaultMediaView(preview: preview) }
+        .onChange(of: self.openingMedia) { open in
+            if !open { self.preview = nil }
+        }
         .confirmationDialog("Удалить эту локальную копию?", isPresented: Binding(get: { self.deleting != nil }, set: { if !$0 { self.deleting = nil } }), titleVisibility: .visible) {
             Button("Удалить копию", role: .destructive) {
                 guard let entry = self.deleting else { return }
@@ -131,20 +134,36 @@ private struct MoonVaultMediaView: View {
     @State private var player: AVPlayer?
     @State private var image: UIImage?
 
+    @State private var failed = false
+
     var body: some View {
-        NavigationStack {
-            Group {
-                if self.preview.kind == .video { VideoPlayer(player: self.player) }
-                else if let image = self.image { Image(uiImage: image).resizable().scaledToFit() }
-                else { ProgressView() }
-            }
-            .navigationTitle("Локальная копия")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Готово") { self.dismiss() } } }
+        Group {
+            if self.failed { Text("Файл недоступен или повреждён.").foregroundStyle(.secondary) }
+            else if let player = self.player { VideoPlayer(player: player) }
+            else if let image = self.image { Image(uiImage: image).resizable().scaledToFit() }
+            else { ProgressView("Открываю…") }
         }
-        .onAppear {
-            if self.preview.kind == .video { self.player = AVPlayer(url: self.preview.url) }
-            else { self.image = UIImage(contentsOfFile: self.preview.url.path) }
+        .navigationTitle(self.preview.kind == .video ? "Видео" : "Фото")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            if self.preview.kind == .video {
+                let asset = AVURLAsset(url: self.preview.url)
+                do {
+                    let playable = try await asset.load(.isPlayable)
+                    guard !Task.isCancelled else { return }
+                    if playable { self.player = AVPlayer(playerItem: AVPlayerItem(asset: asset)) }
+                    else { self.failed = true }
+                } catch { if !Task.isCancelled { self.failed = true } }
+            } else {
+                let url = self.preview.url
+                let thumb = await Task.detached(priority: .userInitiated) { () -> CGImage? in
+                    guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+                    let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: 2048]
+                    return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+                }.value
+                guard !Task.isCancelled else { return }
+                if let thumb { self.image = UIImage(cgImage: thumb) } else { self.failed = true }
+            }
         }
         .onDisappear {
             self.player?.pause()

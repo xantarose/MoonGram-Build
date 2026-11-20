@@ -258,15 +258,12 @@ index 0038369a..e61c907f 100644
          _dataDict = [[NSMutableDictionary alloc] init];
          
 diff --git a/submodules/ChatListUI/Sources/ChatListController.swift b/submodules/ChatListUI/Sources/ChatListController.swift
-index 1ef2cfaf..d5963ad8 100644
+index 1ef2cfaf..9133f89c 100644
 --- a/submodules/ChatListUI/Sources/ChatListController.swift
 +++ b/submodules/ChatListUI/Sources/ChatListController.swift
-@@ -6915,13 +6915,11 @@ private final class ChatListLocationContext {
-         self.location = location
-         self.parentController = parentController
+@@ -6917,11 +6917,8 @@ private final class ChatListLocationContext {
          
--        let hasProxy = context.sharedContext.accountManager.sharedData(keys: [SharedDataKeys.proxySettings])
-+        let hasProxy = context.sharedContext.accountManager.sharedData(keys: [SharedDataKeys.proxySettings, SharedDataKeys.networkEngineSettings])
+         let hasProxy = context.sharedContext.accountManager.sharedData(keys: [SharedDataKeys.proxySettings])
          |> map { sharedData -> (Bool, Bool) in
 -            if let settings = sharedData.entries[SharedDataKeys.proxySettings]?.get(ProxySettings.self) {
 -                return (!settings.servers.isEmpty, settings.enabled)
@@ -274,12 +271,11 @@ index 1ef2cfaf..d5963ad8 100644
 -                return (false, false)
 -            }
 +            let proxy = sharedData.entries[SharedDataKeys.proxySettings]?.get(ProxySettings.self) ?? .defaultSettings
-+            let engine = sharedData.entries[SharedDataKeys.networkEngineSettings]?.get(NetworkEngineSettings.self) ?? .defaultSettings
-+            return (!proxy.servers.isEmpty || engine.engine == .rust, proxy.enabled && proxy.activeServer != nil)
++            return (!proxy.servers.isEmpty, proxy.enabled && proxy.activeServer != nil)
          }
          |> distinctUntilChanged(isEqual: { lhs, rhs in
              return lhs == rhs
-@@ -7438,7 +7436,7 @@ private final class ChatListLocationContext {
+@@ -7438,7 +7435,7 @@ private final class ChatListLocationContext {
              var checkProxy = false
              switch networkState {
              case .waitingForNetwork:
@@ -288,52 +284,43 @@ index 1ef2cfaf..d5963ad8 100644
              case let .connecting(proxy):
                  let text = presentationData.strings.State_Connecting
                  if let proxy = proxy, proxy.hasConnectionIssues {
-diff --git a/submodules/GalleryUI/BUILD b/submodules/GalleryUI/BUILD
-index 0116b061..5508289a 100644
---- a/submodules/GalleryUI/BUILD
-+++ b/submodules/GalleryUI/BUILD
-@@ -10,6 +10,7 @@ swift_library(
-         "-warnings-as-errors",
-     ],
-     deps = [
-+        "//submodules/MoonGramBridge",
-         "//submodules/UrlWhitelist",
-         "//submodules/SSignalKit/SwiftSignalKit:SwiftSignalKit",
-         "//submodules/AsyncDisplayKit:AsyncDisplayKit",
-diff --git a/submodules/GalleryUI/Sources/SecretMediaPreviewController.swift b/submodules/GalleryUI/Sources/SecretMediaPreviewController.swift
-index 3596b9d8..3f37712a 100644
---- a/submodules/GalleryUI/Sources/SecretMediaPreviewController.swift
-+++ b/submodules/GalleryUI/Sources/SecretMediaPreviewController.swift
+diff --git a/submodules/MtProtoKit/Sources/MTTcpConnection.m b/submodules/MtProtoKit/Sources/MTTcpConnection.m
+index 6b9bc4d2..5bcf27db 100644
+--- a/submodules/MtProtoKit/Sources/MTTcpConnection.m
++++ b/submodules/MtProtoKit/Sources/MTTcpConnection.m
 @@ -1,4 +1,5 @@
- import Foundation
-+import MoonGramBridge
- import UIKit
- import AsyncDisplayKit
- import Display
-@@ -146,6 +147,7 @@ private final class SecretMediaPreviewControllerNode: GalleryControllerNode {
- }
+ #import "MTTcpConnection.h"
++#import "MoonGram/MTTelegramWebSocket.h"
  
- public final class SecretMediaPreviewController: ViewController {
-+    private let moonGramCaptureDisposable = MetaDisposable()
-     private let context: AccountContext
-     private let messageId: MessageId
+ #import <MtProtoKit/MTLogging.h>
+ #import <MtProtoKit/MTQueue.h>
+@@ -853,6 +854,7 @@ struct ctr_state {
+     int32_t _mtpPort;
+     MTProxySecret *_mtpSecret;
+     bool _isWebProxy;
++    bool _isTelegramWebSocket;
+     NSData *_helloRandom;
+     NSData *_currentHelloResponse;
      
-@@ -226,6 +228,7 @@ public final class SecretMediaPreviewController: ViewController {
-     }
-     
-     deinit {
-+        self.moonGramCaptureDisposable.dispose()
-         self.disposable.dispose()
-         self.markMessageAsConsumedDisposable.dispose()
-         if let hiddenMediaManagerIndex = self.hiddenMediaManagerIndex {
-@@ -549,6 +552,7 @@ public final class SecretMediaPreviewController: ViewController {
-                     self?.didSetReady = true
-                 }
-                 self._ready.set(ready |> map { true })
-+                self.moonGramCaptureDisposable.set(MoonVaultBridge.viewOnce(context: self.context, message: message, cachedVideoPath: tempFilePath))
-                 self.markMessageAsConsumedDisposable.set(self.context.engine.messages.markMessageContentAsConsumedInteractively(messageId: message.id).start())
-             } else {
-                 var beginTimeAndTimeout: (Double, Double, Bool)?
+@@ -918,6 +920,7 @@ struct ctr_state {
+         
+         if (context.apiEnvironment.socksProxySettings != nil) {
+             _isWebProxy = context.apiEnvironment.socksProxySettings.webProxy;
++            _isTelegramWebSocket = _isWebProxy && [context.apiEnvironment.socksProxySettings.ip isEqualToString:@"web.telegram.org"] && context.apiEnvironment.socksProxySettings.secret != nil && context.apiEnvironment.socksProxySettings.secret.length == 0;
+             if (context.apiEnvironment.socksProxySettings.secret != nil) {
+                 _mtpIp = context.apiEnvironment.socksProxySettings.ip;
+                 _mtpPort = context.apiEnvironment.socksProxySettings.port;
+@@ -1006,7 +1009,9 @@ struct ctr_state {
+             // the server it is pinging - so an ungated factory silently routes those through
+             // the carrier to the relay's own backend instead of the address they asked for.
+             id<MTTcpConnectionInterface> injected = nil;
+-            if (_makeTcpConnectionInterface) {
++            if (_isTelegramWebSocket) {
++                injected = [[MTTelegramWebSocket alloc] initWithDatacenterTag:_datacenterTag delegate:self queue:[[MTTcpConnection tcpQueue] nativeQueue]];
++            } else if (_makeTcpConnectionInterface) {
+                 injected = _makeTcpConnectionInterface(self, [[MTTcpConnection tcpQueue] nativeQueue]);
+             }
+             bool injectedIsWebProxyCarrier = injected != nil
 diff --git a/submodules/PasscodeCore/Sources/Passcode.swift b/submodules/PasscodeCore/Sources/Passcode.swift
 index d1ff0f65..93fd26d0 100644
 --- a/submodules/PasscodeCore/Sources/Passcode.swift
@@ -394,6 +381,49 @@ index d1ff0f65..93fd26d0 100644
          if let group = self.resolvedPrivateAccessGroup { return group }
          guard let group = self.resolvePrivateAccessGroup?(), !group.isEmpty else {
              throw PasscodeError.unavailable
+diff --git a/submodules/SettingsUI/Sources/Data and Storage/ProxyListSettingsController.swift b/submodules/SettingsUI/Sources/Data and Storage/ProxyListSettingsController.swift
+index e42e4d60..1dd1af10 100644
+--- a/submodules/SettingsUI/Sources/Data and Storage/ProxyListSettingsController.swift	
++++ b/submodules/SettingsUI/Sources/Data and Storage/ProxyListSettingsController.swift	
+@@ -389,6 +389,7 @@ public func proxySettingsController(accountManager: AccountManager<TelegramAccou
+             return current
+         }).start()
+     }, editServer: { server in
++        guard !server.isMoonTelegramWebSocket else { return }
+         pushControllerImpl?(proxyServerSettingsController(sharedContext: sharedContext, presentationData: presentationData, updatedPresentationData: updatedPresentationData, accountManager: accountManager, network: network, currentSettings: server))
+     }, removeServer: { server in
+         let _ = updateProxySettingsInteractively(accountManager: accountManager, { current in
+@@ -544,7 +545,7 @@ public func proxySettingsController(accountManager: AccountManager<TelegramAccou
+             |> take(1)
+             |> deliverOnMainQueue).start(next: { settings in
+                 var result = ""
+-                for server in settings.servers {
++                for server in settings.servers where !server.isMoonTelegramWebSocket {
+                     var string: String
+                     switch server.connection {
+                     case let .mtp(secret):
+diff --git a/submodules/SettingsUI/Sources/Data and Storage/ProxySettingsServerItem.swift b/submodules/SettingsUI/Sources/Data and Storage/ProxySettingsServerItem.swift
+index 9094737b..624ac9c8 100644
+--- a/submodules/SettingsUI/Sources/Data and Storage/ProxySettingsServerItem.swift	
++++ b/submodules/SettingsUI/Sources/Data and Storage/ProxySettingsServerItem.swift	
+@@ -250,7 +250,7 @@ private final class ProxySettingsServerItemNode: ItemListRevealOptionsItemNode {
+             // render as `host/my%5Fapp`. The address is already restricted to ASCII
+             // alphanumerics, `-`, `_`, `.` and `/` by canonicalHost/canonicalPath.
+             let webProxyAddress = item.server.webProxyAddress
+-            titleAttributedString.append(NSAttributedString(string: webProxyAddress ?? urlEncodedStringFromString(item.server.host), font: titleFont, textColor: item.theme.list.itemPrimaryTextColor))
++            titleAttributedString.append(NSAttributedString(string: item.server.isMoonTelegramWebSocket ? "Telegram WebSocket" : (webProxyAddress ?? urlEncodedStringFromString(item.server.host)), font: titleFont, textColor: item.theme.list.itemPrimaryTextColor))
+             if webProxyAddress == nil {
+                 titleAttributedString.append(NSAttributedString(string: ":\(item.server.port)", font: titleFont, textColor: item.theme.list.itemSecondaryTextColor))
+             }
+@@ -298,6 +298,8 @@ private final class ProxySettingsServerItemNode: ItemListRevealOptionsItemNode {
+                     strongSelf.item = item
+                     strongSelf.layoutParams = params
+                     
++                    strongSelf.infoButtonNode.isHidden = item.server.isMoonTelegramWebSocket
++                    strongSelf.infoIconNode.isHidden = item.server.isMoonTelegramWebSocket
+                     strongSelf.infoButtonNode.accessibilityLabel = item.strings.Conversation_Info
+                     strongSelf.activateArea.accessibilityLabel = "\(titleAttributedString.string)\n\(statusAttributedString.string)"
+                     if item.active {
 diff --git a/submodules/SettingsUI/Sources/Themes/ThemeSettingsAppIconItem.swift b/submodules/SettingsUI/Sources/Themes/ThemeSettingsAppIconItem.swift
 index c7d79fbf..ca4ff0cb 100644
 --- a/submodules/SettingsUI/Sources/Themes/ThemeSettingsAppIconItem.swift
@@ -461,6 +491,85 @@ index 510cb791..440dfbec 100644
          #if os(iOS)
          // iOS only for now: the Rust engine is the macOS default, and its online keepalive cadence
          // (pings every 1-2 s while the account is in front) has not been measured there.
+diff --git a/submodules/TelegramCore/Sources/Network/Network.swift b/submodules/TelegramCore/Sources/Network/Network.swift
+index d0a36f61..1b2485d0 100644
+--- a/submodules/TelegramCore/Sources/Network/Network.swift
++++ b/submodules/TelegramCore/Sources/Network/Network.swift
+@@ -707,23 +707,18 @@ func initializedNetwork(accountId: AccountRecordId, arguments: NetworkInitializa
+                 rustDisabledReason = networkLivenessDisabledReason()
+             }
+             #endif
+-            let resolvedEngine = resolveNetworkEngine(accountId: accountId, context: context, factory: arguments.networkEngineFactory, settings: networkEngine.settings, rustDisabledReason: rustDisabledReason, isAppExtension: isAppExtension)
++            let initialEngineSettings = initialActiveServer?.isMoonTelegramWebSocket == true ? NetworkEngineSettings(engine: .mtProtoKit) : networkEngine.settings
++            let resolvedEngine = resolveNetworkEngine(accountId: accountId, context: context, factory: arguments.networkEngineFactory, settings: initialEngineSettings, rustDisabledReason: rustDisabledReason, isAppExtension: isAppExtension)
+             resolvedEngine.activate()
+             let rustEngineDisabled = rustDisabledReason != nil
+-            // Live engine switching (the server kill switch, a WEB proxy turned on and off) is macOS only.
+-            // On iOS the engine changes only through the Debug Settings switch, at the next launch: no
+-            // wrapper is created, so switchEngine/disableRustEngine have nothing to act on and the
+-            // network runs the resolved engine directly, exactly as without a factory.
+-            #if os(macOS)
+             let prefersRustEngine = (networkEngine.settings?.engine ?? NetworkEngineSettings.defaultSettings.engine) == .rust
+-            let rustEngineWaitsForWebProxy = arguments.networkEngineFactory != nil && !rustEngineDisabled && resolvedEngine.kind == .mtProtoKit && prefersRustEngine && initialActiveServer?.isWebProxy == true && arguments.networkEngineFactory?.supportsWebProxy != true
+-            // Live switching only ever moves a network off Rust, or back to Rust after a WEB proxy, so it
+-            // is needed only while Rust is in play; otherwise MtProtoKit runs directly.
+-            let switchingEngine = arguments.networkEngineFactory != nil && (resolvedEngine.kind == .rust || rustEngineWaitsForWebProxy) ? SwitchingNetworkEngine(engine: resolvedEngine) : nil
++            #if os(macOS)
++            let needsLegacyProxy = initialActiveServer?.isWebProxy == true && arguments.networkEngineFactory?.supportsWebProxy != true
+             #else
+-            let rustEngineWaitsForWebProxy = false
+-            let switchingEngine: SwitchingNetworkEngine? = nil
++            let needsLegacyProxy = false
+             #endif
++            let rustEngineWaitsForWebProxy = arguments.networkEngineFactory != nil && !rustEngineDisabled && resolvedEngine.kind == .mtProtoKit && prefersRustEngine && (initialActiveServer?.isMoonTelegramWebSocket == true || needsLegacyProxy)
++            let switchingEngine = arguments.networkEngineFactory != nil && (resolvedEngine.kind == .rust || rustEngineWaitsForWebProxy) ? SwitchingNetworkEngine(engine: resolvedEngine) : nil
+             let telemetryDirectory = basePath + "/network-telemetry"
+             let telemetryConfiguration = NetworkTelemetryConfiguration.with(appConfiguration: appConfiguration)
+             let telemetry: NetworkTelemetry?
+@@ -1207,7 +1202,7 @@ public final class Network: NSObject {
+             }
+         }
+         if activeServer?.isWebProxy == true {
+-            if self.engineKind == .rust && self.engineFactory?.supportsWebProxy != true && self.switchEngine(to: .mtProtoKit, reason: "WEB proxy") {
++            if self.engineKind == .rust && (activeServer?.isMoonTelegramWebSocket == true || self.engineFactory?.supportsWebProxy != true) && self.switchEngine(to: .mtProtoKit, reason: "WEB proxy") {
+                 let _ = self.rustEngineWaitsForWebProxy.swap(true)
+             }
+         } else if self.rustEngineWaitsForWebProxy.swap(false) {
+diff --git a/submodules/TelegramCore/Sources/Settings/ProxySettings.swift b/submodules/TelegramCore/Sources/Settings/ProxySettings.swift
+index 1245976b..534cc92f 100644
+--- a/submodules/TelegramCore/Sources/Settings/ProxySettings.swift
++++ b/submodules/TelegramCore/Sources/Settings/ProxySettings.swift
+@@ -10,6 +10,30 @@ public func updateProxySettingsInteractively(accountManager: AccountManager<Tele
+     }
+ }
+ 
++public extension ProxyServerSettings {
++    // An ordinary WEB relay always has a nonempty secret. Only this exact local descriptor
++    // selects MTProtoKit's first-party, per-DC Telegram WebSocket transport.
++    static var moonTelegramWebSocket: ProxyServerSettings {
++        ProxyServerSettings(host: "web.telegram.org", port: 443, connection: .web(secret: Data(), path: ""))
++    }
++    var isMoonTelegramWebSocket: Bool { self == .moonTelegramWebSocket }
++}
++
++public extension ProxySettings {
++    func withMoonTelegramWebSocket(_ enabled: Bool) -> ProxySettings {
++        var result = self
++        let server = ProxyServerSettings.moonTelegramWebSocket
++        if enabled {
++            if !result.servers.contains(server) { result.servers.insert(server, at: 0) }
++            result.activeServer = server
++            result.enabled = true
++        } else if result.activeServer == server {
++            result.enabled = false
++        }
++        return result
++    }
++}
++
+ extension ProxyServerSettings {
+     var isWebProxy: Bool {
+         if case .web = self.connection {
 diff --git a/submodules/TelegramCore/Sources/State/AccountViewTracker.swift b/submodules/TelegramCore/Sources/State/AccountViewTracker.swift
 index 964f7602..9863a8fb 100644
 --- a/submodules/TelegramCore/Sources/State/AccountViewTracker.swift
@@ -474,29 +583,9 @@ index 964f7602..9863a8fb 100644
                                  let request: Signal<Bool, MTRpcError>
                                  switch inputPeer {
 diff --git a/submodules/TelegramCore/Sources/State/ManagedConsumePersonalMessagesActions.swift b/submodules/TelegramCore/Sources/State/ManagedConsumePersonalMessagesActions.swift
-index bb453264..2bed6de1 100644
+index bb453264..4d810ab7 100644
 --- a/submodules/TelegramCore/Sources/State/ManagedConsumePersonalMessagesActions.swift
 +++ b/submodules/TelegramCore/Sources/State/ManagedConsumePersonalMessagesActions.swift
-@@ -253,8 +253,7 @@ func managedReadReactionOrPollVoteActions(postbox: Postbox, network: Network, st
- 
- private func synchronizeConsumeMessageContents(transaction: Transaction, postbox: Postbox, network: Network, stateManager: AccountStateManager, id: MessageId) -> Signal<Void, NoError> {
-     if id.peerId.namespace == Namespaces.Peer.CloudUser || id.peerId.namespace == Namespaces.Peer.CloudGroup {
--        return network.request(Api.functions.messages.readMessageContents(id: [id.id]))
--            |> map(Optional.init)
-+        return moonReadReceipt(accountPeerId: stateManager.accountPeerId) { network.request(Api.functions.messages.readMessageContents(id: [id.id])) }
-             |> `catch` { _ -> Signal<Api.messages.AffectedMessages?, NoError> in
-                 return .single(nil)
-             }
-@@ -288,7 +287,8 @@ private func synchronizeConsumeMessageContents(transaction: Transaction, postbox
-             }
-     } else if id.peerId.namespace == Namespaces.Peer.CloudChannel {
-         if let peer = transaction.getPeer(id.peerId), let inputChannel = apiInputChannel(peer) {
--            return network.request(Api.functions.channels.readMessageContents(channel: inputChannel, id: [id.id]))
-+            return moonReadReceipt(accountPeerId: stateManager.accountPeerId) { network.request(Api.functions.channels.readMessageContents(channel: inputChannel, id: [id.id])) }
-+                |> map { $0 ?? .boolFalse }
-                 |> `catch` { _ -> Signal<Api.Bool, NoError> in
-                     return .single(.boolFalse)
-                 } |> mapToSignal { result -> Signal<Void, NoError> in
 @@ -322,8 +322,7 @@ private func synchronizeConsumeMessageContents(transaction: Transaction, postbox
  
  private func synchronizeReadMessageReactionsOrPollVotes(transaction: Transaction, postbox: Postbox, network: Network, stateManager: AccountStateManager, id: MessageId) -> Signal<Void, NoError> {
@@ -537,19 +626,6 @@ index e8e08874..76beb5b3 100644
          if let peer = transaction.getPeer(peerId) {
              if peerId == accountPeerId {
                  return .complete()
-diff --git a/submodules/TelegramCore/Sources/State/ManagedSynchronizeConsumeMessageContentsOperations.swift b/submodules/TelegramCore/Sources/State/ManagedSynchronizeConsumeMessageContentsOperations.swift
-index b5ede6a8..c8e8f90b 100644
---- a/submodules/TelegramCore/Sources/State/ManagedSynchronizeConsumeMessageContentsOperations.swift
-+++ b/submodules/TelegramCore/Sources/State/ManagedSynchronizeConsumeMessageContentsOperations.swift
-@@ -110,6 +110,8 @@ func managedSynchronizeConsumeMessageContentOperations(postbox: Postbox, network
- }
- 
- private func synchronizeConsumeMessageContents(transaction: Transaction, network: Network, stateManager: AccountStateManager, peerId: PeerId, operation: SynchronizeConsumeMessageContentsOperation) -> Signal<Void, NoError> {
-+    // Local consumption already happened; the worker removes the persisted operation next.
-+    if moonPrivacy(stateManager.accountPeerId).hideReadReceipts { return .complete() }
-     if peerId.namespace == Namespaces.Peer.CloudUser || peerId.namespace == Namespaces.Peer.CloudGroup {
-         return network.request(Api.functions.messages.readMessageContents(id: operation.messageIds.map { $0.id }))
-         |> map(Optional.init)
 diff --git a/submodules/TelegramCore/Sources/State/ManagedSynchronizeMarkAllUnseenPersonalMessagesOperations.swift b/submodules/TelegramCore/Sources/State/ManagedSynchronizeMarkAllUnseenPersonalMessagesOperations.swift
 index ba2fc52d..da1dc706 100644
 --- a/submodules/TelegramCore/Sources/State/ManagedSynchronizeMarkAllUnseenPersonalMessagesOperations.swift
@@ -794,8 +870,59 @@ index bd33bb7f..5f0278cf 100644
          "//submodules/UrlWhitelist",
          "//submodules/TelegramUI/Components/NavigationBarNode",
          "//submodules/TelegramUI/Components/NavigationBarComponent",
+diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoData.swift b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoData.swift
+index 880fc990..43c4c3a0 100644
+--- a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoData.swift
++++ b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoData.swift
+@@ -1,3 +1,4 @@
++import MoonGramNativeGifts
+ import Foundation
+ import UIKit
+ import TelegramCore
+@@ -1611,6 +1612,10 @@ func peerInfoScreenData(
+                 walletBalance = .single(nil)
+             }
+ 
++            let catalogCount: Signal<Int, NoError>
++            if #available(iOS 16.0, *), peerId.namespace == Namespaces.Peer.CloudUser {
++                catalogCount = moonCatalogGifts(accountID: context.account.peerId.id._internalGetInt64Value(), peerID: peerId.id._internalGetInt64Value()) |> map { $0.count } |> distinctUntilChanged
++            } else { catalogCount = .single(0) }
+             let forcedLinkedCommunityId = Atomic<EnginePeer.Id?>(value: nil)
+             
+             return combineLatest(
+@@ -1635,15 +1640,15 @@ func peerInfoScreenData(
+                 premiumGiftOptions,
+                 webAppPermissions,
+                 savedMusicContext.state,
+-                combineLatest(businessConnectedBot, walletBalance, agentState)
++                combineLatest(businessConnectedBot, walletBalance, agentState, catalogCount)
+             )
+             |> mapToSignal { peerView, availablePanes, globalNotificationSettings, encryptionKeyFingerprint, status, hasStories, hasStoryArchive, recommendedBots, accountIsPremium, savedMessagesPeer, hasSavedMessagesChats, hasSavedMessages, hasSavedMessageTags, hasBotPreviewItems, personalChannel, privacySettings, starsRevenueContextAndState, revenueContextAndState, premiumGiftOptions, webAppPermissions, savedMusicState, businessConnectedBotAndWalletBalanceAndAgentState -> Signal<PeerInfoScreenData, NoError> in
+-                let (businessConnectedBot, walletBalance, agentState) = businessConnectedBotAndWalletBalanceAndAgentState
++                let (businessConnectedBot, walletBalance, agentState, localGiftCount) = businessConnectedBotAndWalletBalanceAndAgentState
+                 var availablePanes = availablePanes
+                 if isMyProfile {
+                     availablePanes?.insert(.stories, at: 0)
+-                    if availablePanes != nil, profileGiftsContext != nil, let cachedData = peerView.cachedData as? CachedUserData {
+-                        if let starGiftsCount = cachedData.starGiftsCount, starGiftsCount > 0 {
++                    if availablePanes != nil, profileGiftsContext != nil {
++                        if ((peerView.cachedData as? CachedUserData)?.starGiftsCount ?? 0) > 0 || localGiftCount > 0 {
+                             availablePanes?.insert(.gifts, at: 1)
+                         }
+                     }
+@@ -1655,8 +1660,8 @@ func peerInfoScreenData(
+                         availablePanes?.insert(.stories, at: 0)
+                     }
+                     
+-                    if availablePanes != nil, profileGiftsContext != nil, let cachedData = peerView.cachedData as? CachedUserData, peerView.peerId != context.account.peerId {
+-                        if let starGiftsCount = cachedData.starGiftsCount, starGiftsCount > 0 {
++                    if availablePanes != nil, profileGiftsContext != nil, peerView.peerId != context.account.peerId {
++                        if ((peerView.cachedData as? CachedUserData)?.starGiftsCount ?? 0) > 0 || localGiftCount > 0 {
+                             availablePanes?.insert(.gifts, at: hasStories ? 1 : 0)
+                         }
+                     }
 diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoHeaderNode.swift b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoHeaderNode.swift
-index 7751e79e..f7bb2f89 100644
+index 7751e79e..3cd614e9 100644
 --- a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoHeaderNode.swift
 +++ b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoHeaderNode.swift
 @@ -1,4 +1,5 @@
@@ -804,15 +931,21 @@ index 7751e79e..f7bb2f89 100644
  import UIKit
  import AsyncDisplayKit
  import Display
-@@ -705,6 +706,7 @@ final class PeerInfoHeaderNode: ASDisplayNode {
-         self.presentationData = presentationData
+@@ -689,8 +690,12 @@ final class PeerInfoHeaderNode: ASDisplayNode {
+         }
          
-         let premiumConfiguration = PremiumConfiguration.with(appConfiguration: self.context.currentAppConfiguration.with { $0 })
+         let currentSavedMusic = self.profileMusic(peer: peer, screenData: screenData)
 +        let moonProfile = peer.flatMap { $0.id.namespace == Namespaces.Peer.CloudUser ? MoonStore.shared.replacementProfile(accountID: self.context.account.peerId.id._internalGetInt64Value(), peerID: $0.id.id._internalGetInt64Value()) : nil }
-         var credibilityIcon: CredibilityIcon = .none
-         var verifiedIcon: CredibilityIcon = .none
-         var statusIcon: CredibilityIcon = .none
-@@ -717,7 +719,7 @@ final class PeerInfoHeaderNode: ASDisplayNode {
++        let displayWallet = peer.flatMap { $0.id.namespace == Namespaces.Peer.CloudUser ? MoonStore.shared.visibleProfile(accountID: self.context.account.peerId.id._internalGetInt64Value(), peerID: $0.id.id._internalGetInt64Value())?.walletBalance?.nanoUnits : nil }
+         let currentWalletBalance: Int64?
+-        if !self.isSettings, let balance = (screenData?.cachedData as? CachedUserData)?.walletCard?.balance, balance >= 100_000_000 {
++        if !self.isSettings, let displayWallet {
++            currentWalletBalance = displayWallet
++        } else if !self.isSettings, let balance = (screenData?.cachedData as? CachedUserData)?.walletCard?.balance, balance >= 100_000_000 {
+             currentWalletBalance = balance
+         } else {
+             currentWalletBalance = nil
+@@ -717,7 +722,7 @@ final class PeerInfoHeaderNode: ASDisplayNode {
                  credibilityIcon = .scam
              } else if let emojiStatus = peer.emojiStatus {
                  statusIcon = .emojiStatus(emojiStatus)
@@ -821,7 +954,7 @@ index 7751e79e..f7bb2f89 100644
                  credibilityIcon = .premium
              } else {
                  credibilityIcon = .none
-@@ -1267,7 +1269,7 @@ final class PeerInfoHeaderNode: ASDisplayNode {
+@@ -1267,7 +1272,7 @@ final class PeerInfoHeaderNode: ASDisplayNode {
          var panelSubtitleString: (text: String, attributes: MultiScaleTextState.Attributes)?
          let usernameString: (text: String, attributes: MultiScaleTextState.Attributes)
          if let peer = peer {
@@ -830,7 +963,7 @@ index 7751e79e..f7bb2f89 100644
              isVerified = peer.isVerified
              isFake = peer.isFake || peer.isScam
          }
-@@ -1306,16 +1308,24 @@ final class PeerInfoHeaderNode: ASDisplayNode {
+@@ -1306,16 +1311,24 @@ final class PeerInfoHeaderNode: ASDisplayNode {
                  }
              }
  
@@ -857,44 +990,23 @@ index 7751e79e..f7bb2f89 100644
                  subtitleAttributes = MultiScaleTextState.Attributes(font: Font.regular(17.0), color: .white)
                  smallSubtitleAttributes = MultiScaleTextState.Attributes(font: Font.regular(16.0), color: .white, shadowColor: titleShadowColor)
 diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoProfileItems.swift b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoProfileItems.swift
-index 08e627e3..9a3096ad 100644
+index 08e627e3..2e3ee1ed 100644
 --- a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoProfileItems.swift
 +++ b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoProfileItems.swift
-@@ -1,4 +1,7 @@
+@@ -1,4 +1,5 @@
  import Foundation
 +import MoonGramCore
-+import MoonGramUI
-+import MoonGramNativeGifts
  import UIKit
  import Display
  import AccountContext
-@@ -44,6 +47,7 @@ enum InfoSection: Int, CaseIterable {
-     case groupLocation
-     case calls
-     case personalChannel
-+    case moonGram
-     case peerInfo
-     case agentProviders
-     case balances
-@@ -98,6 +102,61 @@ func infoItems(
+@@ -98,6 +99,31 @@ func infoItems(
      }
      
      if case let .user(user) = data.peer {
-+        let moonProfile = MoonStore.shared.visibleProfile(accountID: context.account.peerId.id._internalGetInt64Value(), peerID: user.id.id._internalGetInt64Value())
-+        let moonReplacements = MoonStore.shared.replacementProfile(accountID: context.account.peerId.id._internalGetInt64Value(), peerID: user.id.id._internalGetInt64Value())
-+        for (index, number) in (moonProfile?.collectibleNumbers ?? []).enumerated() {
-+            items[.moonGram]!.append(PeerInfoScreenLabeledValueItem(id: "moonNumber-\(index)",
-+                label: "Визуальный номер", text: number, textBehavior: .multiLine(maxLines: 0, enabledEntities: []),
-+                action: nil, requestLayout: { interaction.requestLayout($0) }))
-+        }
-+        for (index, username) in (moonProfile?.usernames ?? []).enumerated() {
-+            items[.moonGram]!.append(PeerInfoScreenLabeledValueItem(id: "moonUsername-\(index)",
-+                label: "Визуальный юзернейм", text: "@\(username.trimmingCharacters(in: CharacterSet(charactersIn: "@")))",
-+                textBehavior: .multiLine(maxLines: 0, enabledEntities: []),
-+                action: nil, requestLayout: { interaction.requestLayout($0) }))
-+        }
 +        let peerID = user.id.id._internalGetInt64Value()
 +        let accountID = context.account.peerId.id._internalGetInt64Value()
++        let moonProfile = MoonStore.shared.visibleProfile(accountID: accountID, peerID: peerID)
++        let moonMode = (try? MoonStore.shared.settings(accountID: accountID))?.effectiveDisplayMode ?? .original
 +        let accountIDText = String(peerID)
 +        items[.peerInfoTrailing]!.append(PeerInfoScreenLabeledValueItem(id: "moonTelegramID", label: "Telegram ID",
 +            text: accountIDText, action: { _, _ in UIPasteboard.general.string = accountIDText },
@@ -916,48 +1028,81 @@ index 08e627e3..9a3096ad 100644
 +                    requestLayout: { interaction.requestLayout($0) }))
 +            }
 +        }
-+        if #available(iOS 16.0, *), peerID != accountID {
-+            if let moonProfile, !moonProfile.gifts.isEmpty {
-+                items[.moonGram]!.append(PeerInfoScreenDisclosureItem(id: "moonCollection", label: .text("\(moonProfile.gifts.count)"),
-+                    text: "Оформление друга", icon: UIImage(systemName: "moon.stars.fill"), action: {
-+                        Task { @MainActor in
-+                            interaction.getController()?.present(MoonGramScreen(accountID: accountID, peerID: peerID,
-+                                nativeGifts: MoonTelegramGiftProvider(context: context)), in: .window(.root))
-+                        }
-+                    }))
-+            }
-+            if user.id.namespace == Namespaces.Peer.CloudUser, user.botInfo == nil {
-+                items[.peerInfoTrailing]!.append(PeerInfoScreenDisclosureItem(id: "moonArchive", label: .none,
-+                    text: "Локальные копии", icon: UIImage(systemName: "lock.doc"), action: {
-+                        Task { @MainActor in
-+                            interaction.getController()?.present(MoonGramScreen(accountID: accountID, archivePeerID: peerID), in: .window(.root))
-+                        }
-+                    }))
-+            }
-+        }
          let ItemCallList = 1000
          let ItemPersonalChannelHeader = 2000
          let ItemPersonalChannel = 2001
-@@ -177,7 +236,7 @@ func infoItems(
+@@ -177,29 +203,33 @@ func infoItems(
              ))
          }
          
 -        if let phone = user.phone {
-+        if moonReplacements?.collectibleNumbers.isEmpty != false, let phone = user.phone {
-             let formattedPhone = formatPhoneNumber(context: context, number: phone)
+-            let formattedPhone = formatPhoneNumber(context: context, number: phone)
++        let originalPhone = user.phone.flatMap { $0.isEmpty ? nil : formatPhoneNumber(context: context, number: $0) }
++        let phones = MoonProfile.profileValues(original: originalPhone.map { [$0] } ?? [], custom: moonProfile?.collectibleNumbers ?? [], mode: moonMode)
++        for (index, formattedPhone) in phones.enumerated() {
              let label: String
              if formattedPhone.hasPrefix("+888 ") {
-@@ -193,7 +252,7 @@ func infoItems(
+                 label = presentationData.strings.UserInfo_AnonymousNumberLabel
+             } else {
+                 label = presentationData.strings.ContactInfo_PhoneLabelMobile
+             }
+-            items[currentPeerInfoSection]!.append(PeerInfoScreenLabeledValueItem(id: ItemPhoneNumber, label: label, text: formattedPhone, textColor: .accent, action: { node, progress in
+-                interaction.openPhone(phone, node, nil, progress)
++            items[currentPeerInfoSection]!.append(PeerInfoScreenLabeledValueItem(id: index == 0 ? AnyHashable(ItemPhoneNumber) : AnyHashable("phone-\(index)"), label: label, text: formattedPhone, textColor: .accent, textBehavior: .multiLine(maxLines: 0, enabledEntities: []), action: { node, progress in
++                if formattedPhone == originalPhone, let phone = user.phone { interaction.openPhone(phone, node, nil, progress) }
++                else { UIPasteboard.general.string = formattedPhone }
+             }, longTapAction: nil, contextAction: { node, gesture, _ in
+-                interaction.openPhone(phone, node, gesture, nil)
++                if formattedPhone == originalPhone, let phone = user.phone { interaction.openPhone(phone, node, gesture, nil) }
++                else { UIPasteboard.general.string = formattedPhone }
+             }, requestLayout: { animated in
                  interaction.requestLayout(animated)
              }))
          }
 -        if let mainUsername = user.addressName {
-+        if moonReplacements?.usernames.isEmpty != false, let mainUsername = user.addressName {
-             var additionalUsernames: String?
-             let usernames = user.usernames.filter { $0.isActive && $0.username != mainUsername }
-             if !usernames.isEmpty {
+-            var additionalUsernames: String?
+-            let usernames = user.usernames.filter { $0.isActive && $0.username != mainUsername }
+-            if !usernames.isEmpty {
+-                additionalUsernames = presentationData.strings.Profile_AdditionalUsernames(String(usernames.map { "@\($0.username)" }.joined(separator: ", "))).string
++        let realNames = [user.addressName].compactMap { $0 } + user.usernames.filter(\.isActive).map(\.username)
++        let names = MoonProfile.profileValues(original: realNames, custom: moonProfile?.usernames ?? [], mode: moonMode)
++        if let mainUsername = names.first {
++            let additionalUsernames = names.count > 1 ? presentationData.strings.Profile_AdditionalUsernames(names.dropFirst().map { "@\($0)" }.joined(separator: ", ")).string : nil
++            let openUsername: (String, Bool, Promise<Bool>?) -> Void = { name, primary, progress in
++                if realNames.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) { interaction.openUsername(name, primary, progress) }
++                else { UIPasteboard.general.string = "@" + name }
+             }
+-            
+             items[currentPeerInfoSection]!.append(
+                 PeerInfoScreenLabeledValueItem(
+                     id: ItemUsername,
+@@ -207,19 +237,21 @@ func infoItems(
+                     text: "@\(mainUsername)",
+                     additionalText: additionalUsernames,
+                     textColor: .accent,
++                    textBehavior: .multiLine(maxLines: 0, enabledEntities: []),
+                     icon: .qrCode,
+                     action: { _, progress in
+-                        interaction.openUsername(mainUsername, true, progress)
++                        openUsername(mainUsername, true, progress)
+                     }, linkItemAction: { type, item, _, _, progress in
+                         if case .tap = type {
+                             if case let .mention(username) = item {
+-                                interaction.openUsername(String(username[username.index(username.startIndex, offsetBy: 1)...]), false, progress)
++                                openUsername(String(username[username.index(username.startIndex, offsetBy: 1)...]), false, progress)
+                             }
+                         }
+                     }, iconAction: {
+                         interaction.openQrCode()
+                     }, contextAction: { node, gesture, _ in
+-                        interaction.openUsernameContextMenu(node, gesture)
++                        if realNames.contains(mainUsername) { interaction.openUsernameContextMenu(node, gesture) }
++                        else { UIPasteboard.general.string = "@" + mainUsername }
+                     }, requestLayout: { animated in
+                         interaction.requestLayout(animated)
+                     }
 diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreen.swift b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreen.swift
-index 463ab663..a798f07b 100644
+index 463ab663..ed76f1bd 100644
 --- a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreen.swift
 +++ b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreen.swift
 @@ -1,4 +1,6 @@
@@ -975,15 +1120,7 @@ index 463ab663..a798f07b 100644
      case avatar
      case edit
      case proxy
-@@ -199,6 +202,7 @@ enum PeerInfoSettingsSection {
-     case stars
-     case ton
-     case wallet
-+    case walletCollectibles
- }
- 
- enum PeerInfoReportType {
-@@ -235,6 +239,7 @@ final class PeerInfoScrollNode: ASScrollNode {
+@@ -235,6 +238,7 @@ final class PeerInfoScrollNode: ASScrollNode {
  }
  
  final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodeProtocol, ASScrollViewDelegate {
@@ -991,7 +1128,7 @@ index 463ab663..a798f07b 100644
      weak var controller: PeerInfoScreenImpl?
      
      let context: AccountContext
-@@ -2746,6 +2751,7 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
+@@ -2746,6 +2750,7 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
      }
      
      deinit {
@@ -999,7 +1136,7 @@ index 463ab663..a798f07b 100644
          self.dataDisposable?.dispose()
          self.walletStickersPreloadDisposable.dispose()
          self.hiddenMediaDisposable?.dispose()
-@@ -2783,6 +2789,13 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
+@@ -2783,6 +2788,13 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
      
      override func didLoad() {
          super.didLoad()
@@ -1014,7 +1151,7 @@ index 463ab663..a798f07b 100644
          self.view.disablesInteractiveTransitionGestureRecognizerNow = { [weak self] in
              if let strongSelf = self {
 diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenSettingsActions.swift b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenSettingsActions.swift
-index bb413618..ca32b13d 100644
+index bb413618..d0873dda 100644
 --- a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenSettingsActions.swift
 +++ b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenSettingsActions.swift
 @@ -1,4 +1,6 @@
@@ -1031,34 +1168,19 @@ index bb413618..ca32b13d 100644
 +        case .moonGram:
 +            if #available(iOS 16.0, *) {
 +                Task { @MainActor [weak self] in
-+                    guard let self else { return }
-+                    self.controller?.push(MoonGramScreen(accountID: self.context.account.peerId.id._internalGetInt64Value(),
++                    guard let self, let controller = self.controller else { return }
++                    MoonGramScreen.open(from: controller, accountID: self.context.account.peerId.id._internalGetInt64Value(),
 +                        nativeGifts: MoonTelegramGiftProvider(context: self.context),
-+                        transport: moonTransportControls(context: self.context, openProxySettings: { [weak self] in
-+                            guard let self else { return }
-+                            self.controller?.push(proxySettingsController(context: self.context))
-+                        }), pushed: true))
++                        transport: moonTransportControls(context: self.context, openProxySettings: { [weak self, weak controller] in
++                            guard let self, let controller else { return }
++                            controller.push(proxySettingsController(context: self.context))
++                        }), dark: self.presentationData.theme.overallDarkAppearance)
 +                }
 +            }
          case .avatar:
              self.controller?.openAvatarForEditing()
          case .edit:
-@@ -304,12 +318,12 @@ extension PeerInfoScreenNode {
-             if let tonContext = self.controller?.tonContext {
-                 push(self.context.sharedContext.makeStarsTransactionsScreen(context: self.context, starsContext: tonContext))
-             }
--        case .wallet:
-+        case .wallet, .walletCollectibles:
-             guard WalletConfiguration.with(appConfiguration: self.context.currentAppConfiguration.with { $0 }).isAvailable else {
-                 self.controller?.present(UndoOverlayController(presentationData: self.presentationData, content: .info(title: nil, text: self.presentationData.strings.Wallet_Unavailable, timeout: nil, customUndoText: nil), action: { _ in return false }), in: .window(.root))
-                 return
-             }
--            push(self.context.sharedContext.makeWalletScreen(context: self.context))
-+            push(self.context.sharedContext.makeWalletScreen(context: self.context, opensCollectibles: section == .walletCollectibles))
-         }
-     }
- 
-@@ -377,3 +391,29 @@ extension PeerInfoScreenNode {
+@@ -377,3 +391,23 @@ extension PeerInfoScreenNode {
          }))
      }
  }
@@ -1067,18 +1189,12 @@ index bb413618..ca32b13d 100644
 +@MainActor
 +private func moonTransportControls(context: AccountContext, openProxySettings: @escaping @MainActor () -> Void) -> MoonTransportControls {
 +    let manager = context.sharedContext.accountManager
-+    return MoonTransportControls(prefersWebFallback: {
-+        let data = await manager.sharedData(keys: Set([SharedDataKeys.networkEngineSettings])).get()
-+        let settings = data.entries[SharedDataKeys.networkEngineSettings]?.get(NetworkEngineSettings.self) ?? NetworkEngineSettings.defaultSettings
-+        return settings.engine == .rust
-+    }, setWebFallback: { enabled in
-+        await updateNetworkEngineSettings(accountManager: manager) { settings in
-+            var settings = settings
-+            settings.engine = enabled ? .rust : .mtProtoKit
-+            return settings
-+        }.get()
-+    }, usesAlternateEngine: {
-+        return context.account.network.engineKind == .rust
++    return MoonTransportControls(isEnabled: {
++        let data = await manager.sharedData(keys: Set([SharedDataKeys.proxySettings])).get()
++        let proxy = data.entries[SharedDataKeys.proxySettings]?.get(ProxySettings.self) ?? .defaultSettings
++        return proxy.enabled && proxy.activeServer?.isMoonTelegramWebSocket == true
++    }, setEnabled: { enabled in
++        _ = await updateProxySettingsInteractively(accountManager: manager) { $0.withMoonTelegramWebSocket(enabled) }.get()
 +    }, connectionStatus: {
 +        switch await context.account.network.connectionStatus.get() {
 +        case .waitingForNetwork: return "Нет сети"
@@ -1089,14 +1205,29 @@ index bb413618..ca32b13d 100644
 +    }, openProxySettings: openProxySettings)
 +}
 diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoSettingsItems.swift b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoSettingsItems.swift
-index 8e3f9d25..5c9c3fd7 100644
+index 8e3f9d25..8ff462ce 100644
 --- a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoSettingsItems.swift
 +++ b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoSettingsItems.swift
-@@ -13,12 +13,14 @@ import DeviceAccess
+@@ -13,12 +13,29 @@ import DeviceAccess
  import TelegramStringFormatting
  import PeerNameColorItem
  import WalletContext
 +import MoonGramCore
++
++private enum MoonSettingsIcon {
++    static let dark = image(dark: true)
++    static let light = image(dark: false)
++
++    private static func image(dark: Bool) -> UIImage {
++        return UIGraphicsImageRenderer(size: CGSize(width: 30, height: 30)).image { _ in
++            let rect = CGRect(x: 0, y: 0, width: 30, height: 30)
++            UIColor(rgb: 0xa90941, alpha: dark ? 0.55 : 0.17).setFill()
++            UIBezierPath(roundedRect: rect, cornerRadius: 8).fill()
++            let moon = UIImage(systemName: "moon.stars.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold))
++            moon?.withTintColor(dark ? .white : .black, renderingMode: .alwaysOriginal).draw(in: rect.insetBy(dx: 5, dy: 5))
++        }
++    }
++}
  
  enum SettingsSection: Int, CaseIterable {
      case edit
@@ -1107,37 +1238,36 @@ index 8e3f9d25..5c9c3fd7 100644
      case wallet
      case proxy
      case apps
-@@ -38,6 +40,18 @@ func settingsItems(data: PeerInfoScreenData?, context: AccountContext, presentat
+@@ -38,6 +55,15 @@ func settingsItems(data: PeerInfoScreenData?, context: AccountContext, presentat
      for section in SettingsSection.allCases {
          items[section] = []
      }
 +
++    let accountID = context.account.peerId.id._internalGetInt64Value()
++    let appearance = MoonStore.shared.visibleProfile(accountID: accountID, peerID: accountID)
 +    if #available(iOS 16.0, *) {
-+        let enabled = (try? MoonStore.shared.settings(accountID: context.account.peerId.id._internalGetInt64Value()))?.enabled ?? false
-+        items[.moonGram]!.append(PeerInfoScreenDisclosureItem(id: "moonGram", label: .text(enabled ? "Включены" : "Выключены"), text: "MoonGram",
-+            icon: UIImage(systemName: "moon.stars.fill")?.withTintColor(presentationData.theme.list.itemPrimaryTextColor, renderingMode: .alwaysOriginal), action: {
++        let icon = presentationData.theme.overallDarkAppearance ? MoonSettingsIcon.dark : MoonSettingsIcon.light
++        items[.moonGram]!.append(PeerInfoScreenDisclosureItem(id: "moonGram", text: "MoonGram", icon: icon, action: {
 +            interaction.openSettings(.moonGram)
 +        }))
-+        if (try? MoonStore.shared.settings(accountID: context.account.peerId.id._internalGetInt64Value()))?.effectiveDisplayMode == .both,
-+           let profile = MoonStore.shared.visibleProfile(accountID: context.account.peerId.id._internalGetInt64Value(), peerID: context.account.peerId.id._internalGetInt64Value()), let stars = profile.stars {
-+            items[.moonGram]!.append(PeerInfoScreenDisclosureItem(id: "moonStarsBoth", label: .text(String(stars)), text: "Stars · оформление MoonGram", icon: UIImage(systemName: "star"), action: { interaction.openSettings(.moonGram) }))
-+        }
 +    }
      
      let setPhotoTitle: String
      if let peer = data.peer, !peer.profileImageRepresentations.isEmpty {
-@@ -170,29 +184,31 @@ func settingsItems(data: PeerInfoScreenData?, context: AccountContext, presentat
-             } else {
-                 balanceText = NSAttributedString()
-             }
--            items[.wallet]!.append(PeerInfoScreenDisclosureItem(id: 0, label: .attributedText(balanceText), additionalBadgeLabel: presentationData.strings.Settings_New, text: presentationData.strings.Settings_Money, icon: PresentationResourcesSettings.money, action: {
-+            items[.wallet]!.append(PeerInfoScreenDisclosureItem(id: 0, label: .attributedText(balanceText), text: presentationData.strings.Settings_Money, icon: PresentationResourcesSettings.money, action: {
+@@ -155,7 +181,7 @@ func settingsItems(data: PeerInfoScreenData?, context: AccountContext, presentat
+         
+         if WalletConfiguration.with(appConfiguration: context.currentAppConfiguration.with { $0 }).isAvailable {
+             let balanceText: NSAttributedString
+-            if let balance = settings.walletBalance, balance > 10_000_000 {
++            if let balance = appearance?.walletBalance?.nanoUnits ?? settings.walletBalance, appearance?.walletBalance?.nanoUnits != nil || balance > 10_000_000 {
+                 var formattedLabel = formatTonAmountText(balance, dateTimeFormat: presentationData.dateTimeFormat)
+                 if let decimalRange = formattedLabel.range(of: presentationData.dateTimeFormat.decimalSeparator) {
+                     let fractionalDigitsCount = formattedLabel[decimalRange.upperBound...].count
+@@ -173,26 +199,25 @@ func settingsItems(data: PeerInfoScreenData?, context: AccountContext, presentat
+             items[.wallet]!.append(PeerInfoScreenDisclosureItem(id: 0, label: .attributedText(balanceText), additionalBadgeLabel: presentationData.strings.Settings_New, text: presentationData.strings.Settings_Money, icon: PresentationResourcesSettings.money, action: {
                  interaction.openSettings(.wallet)
              }))
-+            items[.wallet]!.append(PeerInfoScreenDisclosureItem(id: "moonWalletCollections",
-+                text: "Коллекция кошелька", icon: UIImage(systemName: "square.grid.2x2"), action: {
-+                    interaction.openSettings(.walletCollectibles)
-+                }))
++
          }
          
 -        if !settings.proxySettings.servers.isEmpty {
@@ -1175,13 +1305,14 @@ index 8e3f9d25..5c9c3fd7 100644
      }
      
      var appIndex = 1000
-@@ -288,10 +304,12 @@ func settingsItems(data: PeerInfoScreenData?, context: AccountContext, presentat
+@@ -288,10 +313,12 @@ func settingsItems(data: PeerInfoScreenData?, context: AccountContext, presentat
          }))
      }
      if let starsState = data.starsState {
-+        let moonStars = MoonStore.shared.replacementProfile(accountID: context.account.peerId.id._internalGetInt64Value(), peerID: context.account.peerId.id._internalGetInt64Value())?.stars
+-        if !isPremiumDisabled || abs(starsState.balance.value) > 0 {
++        let moonStars = appearance?.stars
 +        let displayBalance = moonStars.map { StarsAmount(value: $0, nanos: 0) } ?? starsState.balance
-         if !isPremiumDisabled || abs(starsState.balance.value) > 0 {
++        if !isPremiumDisabled || displayBalance.value > 0 {
              let balanceText: NSAttributedString
 -            if abs(starsState.balance.value) > 0 {
 -                let formattedLabel = formatStarsAmountText(starsState.balance, dateTimeFormat: presentationData.dateTimeFormat)
@@ -1190,6 +1321,126 @@ index 8e3f9d25..5c9c3fd7 100644
                  let smallLabelFont = Font.regular(floor(presentationData.listsFontSize.itemListBaseFontSize / 17.0 * 13.0))
                  let labelFont = Font.regular(presentationData.listsFontSize.itemListBaseFontSize)
                  let labelColor = presentationData.theme.list.itemSecondaryTextColor
+diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoVisualMediaPaneNode/BUILD b/submodules/TelegramUI/Components/PeerInfo/PeerInfoVisualMediaPaneNode/BUILD
+index 7092fe13..cbcbe2ac 100644
+--- a/submodules/TelegramUI/Components/PeerInfo/PeerInfoVisualMediaPaneNode/BUILD
++++ b/submodules/TelegramUI/Components/PeerInfo/PeerInfoVisualMediaPaneNode/BUILD
+@@ -10,6 +10,8 @@ swift_library(
+         "-warnings-as-errors",
+     ],
+     deps = [
++        "//submodules/MoonGramCore",
++        "//submodules/MoonGramNativeGifts",
+         "//submodules/SSignalKit/SwiftSignalKit",
+         "//submodules/AsyncDisplayKit",
+         "//submodules/TelegramCore",
+diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoVisualMediaPaneNode/Sources/GiftsListView.swift b/submodules/TelegramUI/Components/PeerInfo/PeerInfoVisualMediaPaneNode/Sources/GiftsListView.swift
+index d0ff157c..78a00555 100644
+--- a/submodules/TelegramUI/Components/PeerInfo/PeerInfoVisualMediaPaneNode/Sources/GiftsListView.swift
++++ b/submodules/TelegramUI/Components/PeerInfo/PeerInfoVisualMediaPaneNode/Sources/GiftsListView.swift
+@@ -1,3 +1,5 @@
++import MoonGramCore
++import MoonGramNativeGifts
+ import AsyncDisplayKit
+ import UIKit
+ import Display
+@@ -68,6 +70,9 @@ final class GiftsListView: UIView {
+         self.statusPromise.get()
+     }
+             
++    private var moonGifts: [MoonGift] = []
++    private var moonViews: [UUID: (MoonGift, UIView)] = [:]
++    private var moonArtwork: ((MoonGift) -> UIView)?
+     private var starsProducts: [ProfileGiftsContext.State.StarGift]?
+     private var starsItems: [AnyHashable: (StarGiftReference?, ComponentView<Empty>)] = [:]
+     
+@@ -147,17 +152,24 @@ final class GiftsListView: UIView {
+         
+         super.init(frame: .zero)
+                                         
++        let profileCatalog: Signal<[MoonGift], NoError>
++        if #available(iOS 16.0, *), !canSelect, profileGifts.collectionId == nil, peerId.namespace == Namespaces.Peer.CloudUser {
++            let provider = MoonTelegramGiftProvider(context: context)
++            self.moonArtwork = { gift in provider.artwork(for: gift) }
++            profileCatalog = moonCatalogGifts(accountID: context.account.peerId.id._internalGetInt64Value(), peerID: peerId.id._internalGetInt64Value())
++        } else { profileCatalog = .single([]) }
+         self.dataDisposable = combineLatest(
+             queue: Queue.mainQueue(),
+             profileGifts.state,
+-            self.reorderedReferencesPromise.get()
+-        ).startStrict(next: { [weak self] state, reorderedReferences in
++            self.reorderedReferencesPromise.get(), profileCatalog
++        ).startStrict(next: { [weak self] state, reorderedReferences, catalog in
+             guard let self else {
+                 return
+             }
++            self.moonGifts = state.filter == .All && !self.isReordering ? catalog : []
+             let isFirstTime = self.starsProducts == nil
+             let presentationData = self.context.sharedContext.currentPresentationData.with { $0 }
+-            self.statusPromise.set(.single(PeerInfoStatusData(text: presentationData.strings.SharedMedia_GiftCount(state.count ?? 0), isActivity: true, key: .gifts)))
++            self.statusPromise.set(.single(PeerInfoStatusData(text: presentationData.strings.SharedMedia_GiftCount(Int32(clamping: Int(state.count ?? 0) + self.moonGifts.count)), isActivity: true, key: .gifts)))
+             
+             if self.isReordering {
+                 var stateItems: [ProfileGiftsContext.State.StarGift] = state.gifts
+@@ -194,7 +206,7 @@ final class GiftsListView: UIView {
+                 self.pinnedReferences = Array(state.gifts.filter { $0.pinnedToTop }.compactMap { $0.reference })
+             }
+             
+-            self.resultsAreEmpty = state.filter == .All && state.gifts.isEmpty && state.dataState != .loading
++            self.resultsAreEmpty = state.filter == .All && state.gifts.isEmpty && self.moonGifts.isEmpty && state.dataState != .loading
+             self.filteredResultsAreEmpty = state.filter != .All && state.filteredGifts.isEmpty
+         
+             if !self.didSetReady {
+@@ -506,7 +518,8 @@ final class GiftsListView: UIView {
+         let itemsSideInset = params.sideInset + 16.0
+         
+         let defaultItemsInRow = peerInfoGiftsItemsInRow(size: params.size, itemsSideInset: itemsSideInset, spacing: optionSpacing, isTablet: params.deviceMetrics.type == .tablet)
+-        let itemsInRow = max(1, min(starsProducts.count, defaultItemsInRow))
++        let displayCount = starsProducts.count + self.moonGifts.count
++        let itemsInRow = max(1, min(displayCount, defaultItemsInRow))
+         let defaultOptionWidth = (params.size.width - itemsSideInset * 2.0 - optionSpacing * CGFloat(defaultItemsInRow - 1)) / CGFloat(defaultItemsInRow)
+         let optionWidth = (params.size.width - itemsSideInset * 2.0 - optionSpacing * CGFloat(itemsInRow - 1)) / CGFloat(itemsInRow)
+         
+@@ -515,6 +528,30 @@ final class GiftsListView: UIView {
+         var validIds: [AnyHashable] = []
+         var itemFrame = CGRect(origin: CGPoint(x: itemsSideInset, y: topInset), size: starsOptionSize)
+         
++        var visibleGifts = Set<UUID>()
++        for gift in self.moonGifts {
++            if visibleBounds.intersects(itemFrame), let makeArtwork = self.moonArtwork {
++                visibleGifts.insert(gift.id)
++                let view: UIView
++                if let (previous, existing) = self.moonViews[gift.id], previous == gift {
++                    view = existing
++                } else {
++                    self.moonViews[gift.id]?.1.removeFromSuperview()
++                    view = makeArtwork(gift)
++                    self.moonViews[gift.id] = (gift, view)
++                    self.addSubview(view)
++                }
++                view.frame = itemFrame
++            }
++            itemFrame.origin.x += itemFrame.width + optionSpacing
++            if itemFrame.maxX > params.size.width {
++                itemFrame.origin.x = itemsSideInset
++                itemFrame.origin.y += starsOptionSize.height + optionSpacing
++            }
++        }
++        for id in Array(self.moonViews.keys) where !visibleGifts.contains(id) {
++            self.moonViews.removeValue(forKey: id)?.1.removeFromSuperview()
++        }
+         var index: Int32 = 0
+         for product in starsProducts {
+             var isVisible = false
+@@ -844,7 +881,7 @@ final class GiftsListView: UIView {
+             self.starsItems.removeValue(forKey: id)
+         }
+         
+-        var contentHeight = ceil(CGFloat(starsProducts.count) / CGFloat(defaultItemsInRow)) * (starsOptionSize.height + optionSpacing) - optionSpacing + topInset + 16.0
++        var contentHeight = ceil(CGFloat(displayCount) / CGFloat(defaultItemsInRow)) * (starsOptionSize.height + optionSpacing) - optionSpacing + topInset + 16.0
+         
+         let size = params.size
+         let sideInset = params.sideInset
 diff --git a/submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/BUILD b/submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/BUILD
 index 53a80f32..fdb3e360 100644
 --- a/submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/BUILD
@@ -1203,7 +1454,7 @@ index 53a80f32..fdb3e360 100644
          "//submodules/Display",
          "//submodules/TelegramCore",
 diff --git a/submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/Sources/StarsTransactionsScreen.swift b/submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/Sources/StarsTransactionsScreen.swift
-index b4a03995..a1d602f6 100644
+index b4a03995..b59d6163 100644
 --- a/submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/Sources/StarsTransactionsScreen.swift
 +++ b/submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/Sources/StarsTransactionsScreen.swift
 @@ -1,4 +1,5 @@
@@ -1268,7 +1519,7 @@ index b4a03995..a1d602f6 100644
              )
              
              let formattedBalance: String
-+            let moonStars = MoonStore.shared.replacementProfile(accountID: component.context.account.peerId.id._internalGetInt64Value(), peerID: component.context.account.peerId.id._internalGetInt64Value())?.stars
++            let moonStars = MoonStore.shared.visibleProfile(accountID: component.context.account.peerId.id._internalGetInt64Value(), peerID: component.context.account.peerId.id._internalGetInt64Value())?.stars
 +            let displayBalance = !component.starsContext.ton ? (moonStars.map { StarsAmount(value: $0, nanos: 0) } ?? self.starsState?.balance ?? StarsAmount.zero) : (self.starsState?.balance ?? StarsAmount.zero)
              if component.starsContext.ton {
                  formattedBalance = formatTonAmountText(self.starsState?.balance.value ?? 0, dateTimeFormat: environment.dateTimeFormat)
@@ -1287,6 +1538,39 @@ index b4a03995..a1d602f6 100644
                              currency: component.starsContext.ton ? .ton : .stars,
                              rate: nil,
                              actionTitle: component.starsContext.ton ? environment.strings.Ton_WithdrawViaFragment : (withdrawAvailable ? environment.strings.Stars_Intro_BuyShort : environment.strings.Stars_Intro_Buy),
+diff --git a/submodules/TelegramUI/Components/Wallet/WalletScreen/BUILD b/submodules/TelegramUI/Components/Wallet/WalletScreen/BUILD
+index 49086140..f7f0290c 100644
+--- a/submodules/TelegramUI/Components/Wallet/WalletScreen/BUILD
++++ b/submodules/TelegramUI/Components/Wallet/WalletScreen/BUILD
+@@ -12,6 +12,7 @@ swift_library(
+         "-warnings-as-errors",
+     ],
+     deps = [
++        "//submodules/MoonGramCore",
+         "//submodules/LottieBinding",
+         "//submodules/TelegramUI/Components/LottieComponent",
+         "//submodules/AsyncDisplayKit",
+diff --git a/submodules/TelegramUI/Components/Wallet/WalletScreen/Sources/WalletScreen.swift b/submodules/TelegramUI/Components/Wallet/WalletScreen/Sources/WalletScreen.swift
+index cdda30da..e46eb3c9 100644
+--- a/submodules/TelegramUI/Components/Wallet/WalletScreen/Sources/WalletScreen.swift
++++ b/submodules/TelegramUI/Components/Wallet/WalletScreen/Sources/WalletScreen.swift
+@@ -1,4 +1,5 @@
+ import Foundation
++import MoonGramCore
+ import UIKit
+ import LocalAuthentication
+ import Display
+@@ -1604,6 +1605,10 @@ private final class WalletScreenComponent: Component {
+         }
+ 
+         private var displayBalance: Int64? {
++            if let component = self.component {
++                let id = component.context.account.peerId.id._internalGetInt64Value()
++                if let amount = MoonStore.shared.visibleProfile(accountID: id, peerID: id)?.walletBalance?.nanoUnits { return amount }
++            }
+             guard let balance = self.walletState?.balance.currentValue else {
+                 return nil
+             }
 diff --git a/submodules/TelegramUI/Sources/AppDelegate.swift b/submodules/TelegramUI/Sources/AppDelegate.swift
 index cf304286..a4a00e6f 100644
 --- a/submodules/TelegramUI/Sources/AppDelegate.swift

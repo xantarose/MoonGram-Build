@@ -30,6 +30,13 @@ public struct MoonAmount: Codable, Equatable, Sendable {
         self.text = (integral.isEmpty ? "0" : integral) + (fraction.isEmpty ? "" : "." + fraction)
     }
 
+    /// Telegram's wallet presentation accepts a signed 64-bit count of billionths.
+    public var nanoUnits: Int64? {
+        let parts = self.text.components(separatedBy: ".")
+        let fraction = parts.count == 2 ? parts[1] : ""
+        return Int64(parts[0] + fraction + String(repeating: "0", count: 9 - fraction.count))
+    }
+
     public init(from decoder: Decoder) throws {
         try self.init(decoder.singleValueContainer().decode(String.self))
     }
@@ -220,6 +227,17 @@ public struct MoonProfile: Codable, Equatable, Sendable {
         self.additionalNumbers = Array(numbers.dropFirst())
     }
 
+    public static func profileValues(original: [String], custom: [String], mode: MoonDisplayMode) -> [String] {
+        let values: [String]
+        switch mode {
+        case .original: values = original
+        case .visual: values = custom.isEmpty ? original : custom
+        case .both: values = original + custom
+        }
+        var seen = Set<String>()
+        return values.filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+    }
+
     public var artworkBytes: Int { self.gifts.reduce(0) { $0 + ($1.artwork?.count ?? 0) } }
 
     public func shared(includingBalances: Bool) -> MoonProfile {
@@ -250,6 +268,8 @@ public struct MoonSettings: Codable, Equatable, Sendable {
     public var showFriends: Bool
     public var activePresetID: UUID
     public var presets: [MoonPreset]
+    public var recordOwnMessages: Bool?
+    public var keepOwnMedia: Bool?
     public var experiments: MoonExperiments?
     public var privacy: MoonPrivacySettings?
     public var autoPublishStyle: Bool?

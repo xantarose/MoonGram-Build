@@ -155,7 +155,8 @@ class BuildTests(unittest.TestCase):
             with patch("sys.argv", args), patch("build.platform.system", return_value="Darwin"), \
                  patch("build.ROOT", folder), patch("build.prepare"), patch("build.subprocess.run", side_effect=runner):
                 self.assertEqual(build_main(), 0)
-            self.assertEqual(len(captured), 3)
+            self.assertEqual(len(captured), 2)
+            self.assertFalse(any("--nobuild" in str(args) for args in captured))
             self.assertTrue(all(f"--cacheDir={cache_dir.resolve()}" in arguments for arguments in captured))
             self.assertFalse(any(arg.startswith("--target=") for arg in captured[-1]))
             self.assertTrue((folder / "dist/MoonGram-template-personal.ipa").is_file())

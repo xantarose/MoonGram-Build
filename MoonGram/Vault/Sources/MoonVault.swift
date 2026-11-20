@@ -27,6 +27,8 @@ public struct MoonVaultEntry: Codable, Identifiable, Sendable {
     public var kind: MoonVaultKind
     public var deleted: Bool
     public var mediaFile: String?
+    public var priorTexts: [String]?
+    public var editTimestamp: Int32?
 
     public init(peerID: Int64, namespace: Int32, messageID: Int32, timestamp: Int32, text: String,
                 kind: MoonVaultKind = .text) {
@@ -59,7 +61,8 @@ public final class MoonVault: @unchecked Sendable {
     public static let shared = MoonVault()
     private let queue = DispatchQueue(label: "org.moongram.vault", qos: .utility)
     private let directory: URL
-    private var seenText: Set<String> = []
+    private var seenText: [String: SHA256.Digest] = [:]
+    private var seenMedia: Set<String> = []
     private var deletions: [Int64: Set<String>] = [:]
     private var errors: [Int64: String] = [:]
     private let maximumMediaBytes = 67_108_864
@@ -76,9 +79,6 @@ public final class MoonVault: @unchecked Sendable {
     public func capture(_ entry: MoonVaultEntry, accountID: Int64, mediaPath: String? = nil) {
         let media = mediaPath != nil
         guard self.allowed(accountID: accountID, peerID: entry.peerID, media: media), entry.text.utf8.count <= 65_536 else { return }
-        let pinned: MoonPinnedFile?
-        do { pinned = try mediaPath.map { try MoonPinnedFile(path: $0) } }
-        catch { self.queue.async { self.errors[accountID] = MoonVaultError.invalidFile.localizedDescription }; return }
         self.queue.async {
             guard self.allowed(accountID: accountID, peerID: entry.peerID, media: media) else { return }
             do {
@@ -87,21 +87,33 @@ public final class MoonVault: @unchecked Sendable {
                 let root = self.accountDirectory(accountID)
                 let file = root.appendingPathComponent(name + ".mgv")
                 let seenKey = "\(accountID):\(name)"
-                if !media, self.seenText.contains(seenKey) { return }
+                let digest = SHA256.hash(data: Data(entry.text.utf8))
+                if media ? self.seenMedia.contains(seenKey) : self.seenText[seenKey] == digest { return }
                 var value = entry
                 let existed = FileManager.default.fileExists(atPath: file.path)
                 if existed {
                     let old = try self.readEntry(file, accountID: accountID, key: key)
-                    if !media { self.seenText.insert(seenKey); return }
-                    if old.mediaFile != nil { return }
-                    value.deleted = old.deleted
-                    value.text = old.text
+                    value = old
+                    if media {
+                        if old.mediaFile != nil { self.seenMedia.insert(seenKey); return }
+                        value.kind = entry.kind
+                    } else {
+                        guard (entry.editTimestamp ?? entry.timestamp) >= (old.editTimestamp ?? old.timestamp) else { return }
+                        guard old.text != entry.text else { self.seenText[seenKey] = digest; return }
+                        var history = old.priorTexts ?? []
+                        if !old.text.isEmpty { history.append(old.text) }
+                        while history.count > 20 || history.reduce(0, { $0 + $1.utf8.count }) > 196_608 { history.removeFirst() }
+                        value.priorTexts = history
+                        value.text = entry.text
+                        value.editTimestamp = entry.editTimestamp
+                    }
                 }
                 if self.deletions[accountID]?.contains("0:\(entry.messageID)") == true ||
                     self.deletions[accountID]?.contains("\(entry.peerID):\(entry.messageID)") == true { value.deleted = true }
                 var writtenMedia: URL?
                 do {
-                    if let pinned = pinned {
+                    if let mediaPath {
+                        let pinned = try MoonPinnedFile(path: mediaPath)
                         let end = try pinned.handle.seekToEnd()
                         guard end <= UInt64(self.maximumMediaBytes) else { throw MoonVaultError.tooLarge }
                         let size = Int(end)
@@ -120,8 +132,9 @@ public final class MoonVault: @unchecked Sendable {
                     let encoded = try JSONEncoder().encode(value)
                     guard encoded.count <= 524_200 else { throw MoonVaultError.tooLarge }
                     try self.writeEncrypted(encoded, to: file, accountID: accountID, key: key)
-                    self.seenText.insert(seenKey)
-                    if self.seenText.count > 4096 { self.seenText.removeAll(keepingCapacity: true) }
+                    if media { self.seenMedia.insert(seenKey) } else { self.seenText[seenKey] = digest }
+                    if self.seenText.count > 1024 { self.seenText.removeAll(keepingCapacity: true) }
+                    if self.seenMedia.count > 1024 { self.seenMedia.removeAll(keepingCapacity: true) }
                 } catch {
                     if let writtenMedia = writtenMedia { try? FileManager.default.removeItem(at: writtenMedia) }
                     throw error
@@ -200,14 +213,16 @@ public final class MoonVault: @unchecked Sendable {
                     let file = self.accountDirectory(accountID).appendingPathComponent(base + suffix)
                     if FileManager.default.fileExists(atPath: file.path) { try FileManager.default.removeItem(at: file) }
                 }
-                self.seenText.remove("\(accountID):\(base)")
+                self.seenText.removeValue(forKey: "\(accountID):\(base)")
+                self.seenMedia.remove("\(accountID):\(base)")
                 DispatchQueue.main.async { completion(nil) }
             } catch { DispatchQueue.main.async { completion(error) } }
         }
     }
 
     private func allowed(accountID: Int64, peerID: Int64, media: Bool) -> Bool {
-        (try? MoonStore.shared.settings(accountID: accountID).experiments)?.allows(peerID: peerID, media: media) == true
+        guard let prefs = try? MoonStore.shared.settings(accountID: accountID) else { return false }
+        return media ? prefs.keepOwnMedia == true : prefs.recordOwnMessages == true
     }
 
     private func fileName(_ id: String) -> String { SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined() }

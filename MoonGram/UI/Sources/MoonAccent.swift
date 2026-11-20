@@ -21,33 +21,15 @@ enum MoonAccent {
 }
 
 @available(iOS 16.0, *)
-struct MoonActionDock<Content: View>: View {
-    @ViewBuilder let content: () -> Content
-
-    var body: some View {
-        self.content()
-            .frame(maxWidth: 560)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity)
-            .background(.regularMaterial)
-    }
-}
-
-@available(iOS 16.0, *)
 extension View {
-    func moonBottomAction(_ title: String, busy: Bool, action: @escaping () -> Void) -> some View {
-        self.safeAreaInset(edge: .bottom, spacing: 0) {
-            MoonActionDock {
+    func moonSaveAction(busy: Bool, enabled: Bool = true, action: @escaping () -> Void) -> some View {
+        self.toolbar {
+            ToolbarItem(placement: .confirmationAction) {
                 Button(action: action) {
-                    Text(busy ? "Сохраняю…" : title)
-                        .font(.headline)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity, minHeight: 36)
+                    if busy { ProgressView() } else { Text("Сохранить") }
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(MoonAccent.control)
-                .disabled(busy)
+                .accessibilityLabel(busy ? "Сохраняю" : "Сохранить")
+                .disabled(busy || !enabled)
             }
         }
     }

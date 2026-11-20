@@ -7,7 +7,7 @@ import UIKit
 @MainActor
 public protocol MoonNativeGiftProvider: AnyObject {
     func artwork(for gift: MoonGift) -> UIView
-    func editor(for gift: MoonGift, completion: @escaping (MoonGift) -> Void) -> UIViewController
+    func editor(for gift: MoonGift, completion: @escaping (MoonGift) -> Void) -> AnyView
 }
 
 @available(iOS 16.0, *)
@@ -18,13 +18,4 @@ struct MoonNativeArtwork: UIViewRepresentable {
     func updateUIView(_ view: UIView, context: Context) {
         view.accessibilityLabel = "\(self.gift.title), модель \(self.gift.modelName), оформление MoonGram"
     }
-}
-
-@available(iOS 16.0, *)
-struct MoonNativeEditor: UIViewControllerRepresentable {
-    let provider: MoonNativeGiftProvider
-    let gift: MoonGift
-    let completion: (MoonGift) -> Void
-    func makeUIViewController(context: Context) -> UIViewController { self.provider.editor(for: self.gift, completion: self.completion) }
-    func updateUIViewController(_ controller: UIViewController, context: Context) {}
 }

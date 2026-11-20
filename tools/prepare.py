@@ -44,6 +44,7 @@ def prepare(source: Path, dependencies: bool = False) -> None:
     if forward.returncode != 0 and reverse.returncode != 0:
         raise RuntimeError("Patch conflicts with local changes. No reset or overwrite was performed.")
     targets = [
+        (ROOT / "MoonGram/Transport/Sources", source / "submodules/MtProtoKit/Sources/MoonGram"),
         (ROOT / "MoonGram/Core", source / "submodules/MoonGramCore"),
         (ROOT / "MoonGram/Engine/Sources", source / "submodules/TelegramCore/Sources/MoonGram"),
         (ROOT / "MoonGram/UI", source / "submodules/MoonGramUI"),

@@ -51,7 +51,9 @@ jobs:
         timeout-minutes: 5
         with:
           path: ${{ runner.temp }}/moongram-bazel-cache
-          key: moongram-bazel-v1-${{ runner.arch }}-${{ steps.bazel-cache.outputs.xcode }}-${{ hashFiles('upstream.lock.json') }}
+          key: moongram-bazel-v2-${{ runner.arch }}-${{ steps.bazel-cache.outputs.xcode }}-${{ hashFiles('upstream.lock.json') }}-${{ hashFiles('patches/*.patch', 'MoonGram/**/*.swift', 'MoonGram/Transport/**/*') }}
+          restore-keys: |
+            moongram-bazel-v2-${{ runner.arch }}-${{ steps.bazel-cache.outputs.xcode }}-${{ hashFiles('upstream.lock.json') }}-
       - name: Build without real Telegram API credentials
         env:
           BUILD_KIND: ${{ inputs.kind || 'standalone-device' }}
@@ -88,7 +90,7 @@ jobs:
           if [ -d "$cache" ]; then
             size_kib=$(du -sk "$cache" | cut -f1)
             printf 'Bazel cache size: %s KiB\n' "$size_kib"
-            if [ "$size_kib" -le 3145728 ]; then
+            if [ "$size_kib" -le 9437184 ]; then
               echo 'save=true' >> "$GITHUB_OUTPUT"
             fi
           fi
@@ -96,7 +98,7 @@ jobs:
         if: steps.bazel-size.outputs.save == 'true' && steps.bazel-restore.outputs.cache-primary-key != ''
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         continue-on-error: true
-        timeout-minutes: 8
+        timeout-minutes: 12
         with:
           path: ${{ runner.temp }}/moongram-bazel-cache
           key: ${{ steps.bazel-restore.outputs.cache-primary-key }}
